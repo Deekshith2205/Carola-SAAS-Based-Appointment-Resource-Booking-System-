@@ -1,0 +1,265 @@
+// SaaS Appointment & Resource Booking System
+// PostgreSQL + Prisma ORM
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum UserRole {
+  SUPER_ADMIN
+  BUSINESS_OWNER
+  STAFF
+  CUSTOMER
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  EXPIRED
+  SUSPENDED
+}
+
+enum AvailabilityStatus {
+  AVAILABLE
+  UNAVAILABLE
+  BUSY
+  ON_LEAVE
+}
+
+enum ResourceType {
+  ROOM
+  EQUIPMENT
+  VEHICLE
+  OTHER
+}
+
+enum ResourceStatus {
+  AVAILABLE
+  IN_USE
+  MAINTENANCE
+  UNAVAILABLE
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+  RESCHEDULED
+}
+
+enum DayOfWeek {
+  MON
+  TUE
+  WED
+  THU
+  FRI
+  SAT
+  SUN
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+// ---------------------------------------------------------------------------
+// Models
+// ---------------------------------------------------------------------------
+
+model User {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  email     String   @unique
+  password  String
+  role      UserRole
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  ownedBusinesses Business[]    @relation("BusinessOwner")
+  staffProfiles   Staff[]
+  appointments    Appointment[] @relation("CustomerAppointments")
+  notifications   Notification[]
+  reviewedLeaves  StaffLeave[]  @relation("LeaveReviewer")
+
+  @@index([role])
+  @@map("users")
+}
+
+model Business {
+  id                 String             @id @default(uuid()) @db.Uuid
+  ownerId            String             @map("owner_id") @db.Uuid
+  businessName       String             @map("business_name")
+  businessType       String             @map("business_type")
+  phone              String?
+  email              String?
+  address            String?
+  subscriptionStatus SubscriptionStatus @default(TRIAL) @map("subscription_status")
+  createdAt          DateTime           @default(now()) @map("created_at")
+
+  owner        User          @relation("BusinessOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  staff        Staff[]
+  services     Service[]
+  resources    Resource[]
+  appointments Appointment[]
+
+  @@index([ownerId])
+  @@index([subscriptionStatus])
+  @@map("businesses")
+}
+
+model Staff {
+  id                 String             @id @default(uuid()) @db.Uuid
+  businessId         String             @map("business_id") @db.Uuid
+  userId             String             @map("user_id") @db.Uuid
+  designation        String?
+  availabilityStatus AvailabilityStatus @default(AVAILABLE) @map("availability_status")
+  createdAt          DateTime           @default(now()) @map("created_at")
+
+  business     Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  appointments Appointment[]
+  availability StaffAvailability[]
+  leaves       StaffLeave[]
+
+  @@unique([businessId, userId])
+  @@index([businessId])
+  @@index([userId])
+  @@index([availabilityStatus])
+  @@map("staff")
+}
+
+model Service {
+  id              String   @id @default(uuid()) @db.Uuid
+  businessId      String   @map("business_id") @db.Uuid
+  serviceName     String   @map("service_name")
+  durationMinutes Int      @map("duration_minutes")
+  price           Decimal  @db.Decimal(10, 2)
+  description     String?
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  business     Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  appointments Appointment[]
+
+  @@index([businessId])
+  @@map("services")
+}
+
+model Resource {
+  id           String         @id @default(uuid()) @db.Uuid
+  businessId   String         @map("business_id") @db.Uuid
+  resourceName String         @map("resource_name")
+  resourceType ResourceType   @map("resource_type")
+  status       ResourceStatus @default(AVAILABLE)
+  createdAt    DateTime       @default(now()) @map("created_at")
+
+  business     Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  appointments Appointment[]
+
+  @@index([businessId])
+  @@index([status])
+  @@index([businessId, status])
+  @@map("resources")
+}
+
+model Appointment {
+  id              String            @id @default(uuid()) @db.Uuid
+  customerId      String            @map("customer_id") @db.Uuid
+  businessId      String            @map("business_id") @db.Uuid
+  serviceId       String            @map("service_id") @db.Uuid
+  staffId         String?           @map("staff_id") @db.Uuid
+  resourceId      String?           @map("resource_id") @db.Uuid
+  appointmentDate DateTime          @map("appointment_date") @db.Date
+  startTime       DateTime          @map("start_time") @db.Time(0)
+  endTime         DateTime          @map("end_time") @db.Time(0)
+  status          AppointmentStatus @default(PENDING)
+  createdAt       DateTime          @default(now()) @map("created_at")
+
+  customer User      @relation("CustomerAppointments", fields: [customerId], references: [id], onDelete: Restrict)
+  business Business  @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  service  Service   @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  staff    Staff?    @relation(fields: [staffId], references: [id], onDelete: SetNull)
+  resource Resource? @relation(fields: [resourceId], references: [id], onDelete: SetNull)
+
+  @@index([customerId])
+  @@index([businessId])
+  @@index([serviceId])
+  @@index([staffId])
+  @@index([resourceId])
+  @@index([appointmentDate])
+  @@index([status])
+  @@index([businessId, appointmentDate])
+  @@index([staffId, appointmentDate])
+  @@index([businessId, appointmentDate, status])
+  @@map("appointments")
+}
+
+model StaffAvailability {
+  id        String    @id @default(uuid()) @db.Uuid
+  staffId   String    @map("staff_id") @db.Uuid
+  dayOfWeek DayOfWeek @map("day_of_week")
+  startTime DateTime  @map("start_time") @db.Time(0)
+  endTime   DateTime  @map("end_time") @db.Time(0)
+  isActive  Boolean   @default(true) @map("is_active")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  staff Staff @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@unique([staffId, dayOfWeek])
+  @@index([staffId])
+  @@index([staffId, dayOfWeek, isActive])
+  @@map("staff_availability")
+}
+
+model StaffLeave {
+  id          String      @id @default(uuid()) @db.Uuid
+  staffId     String      @map("staff_id") @db.Uuid
+  leaveDate   DateTime    @map("leave_date") @db.Date
+  reason      String?
+  status      LeaveStatus @default(PENDING)
+  reviewedBy  String?     @map("reviewed_by") @db.Uuid
+  reviewedAt  DateTime?   @map("reviewed_at")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  staff    Staff  @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  reviewer User?  @relation("LeaveReviewer", fields: [reviewedBy], references: [id], onDelete: SetNull)
+
+  @@unique([staffId, leaveDate])
+  @@index([staffId])
+  @@index([staffId, status])
+  @@index([leaveDate])
+  @@index([staffId, leaveDate, status])
+  @@map("staff_leave")
+}
+
+model Notification {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  title     String
+  message   String
+  isRead    Boolean  @default(false) @map("is_read")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, isRead])
+  @@index([createdAt])
+  @@map("notifications")
+}
