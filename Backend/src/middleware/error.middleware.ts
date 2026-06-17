@@ -69,6 +69,14 @@ export function errorHandler(
     }
   }
 
+  if (err instanceof Prisma.PrismaClientValidationError) {
+    res.status(400).json({
+      success: false,
+      message: 'Invalid data provided to the database.',
+    });
+    return;
+  }
+
   if (env.NODE_ENV === 'development') {
     console.error(err);
   }

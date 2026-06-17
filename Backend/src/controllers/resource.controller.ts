@@ -8,6 +8,8 @@ import type { BusinessScopedListQuery } from '../validations/common.validation';
 export const create = asyncHandler(async (req: Request, res: Response) => {
   const resource = await resourceService.createResource(req.user!.id, req.user!.role, req.body);
 
+  req.auditLog = { action: 'RESOURCE_CREATION', entity: 'Resource', entityId: resource.id };
+
   sendSuccess(res, { resource }, {
     message: 'Resource created successfully',
     statusCode: 201,
@@ -30,6 +32,8 @@ export const update = asyncHandler(async (req: Request, res: Response) => {
     req.user!.role,
     req.body
   );
+
+  req.auditLog = { action: 'RESOURCE_UPDATE', entity: 'Resource', entityId: resource.id };
 
   sendSuccess(res, { resource }, { message: 'Resource updated successfully' });
 });

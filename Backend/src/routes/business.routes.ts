@@ -9,6 +9,7 @@ import {
   updateBusinessSchema,
 } from '../validations/business.validation';
 import { uuidParamSchema, businessListQuerySchema } from '../validations/common.validation';
+import { auditMiddleware } from '../middleware/audit.middleware';
 import * as businessController from '../controllers/business.controller';
 
 const router = Router();
@@ -22,6 +23,7 @@ router.post(
   tenantContext,
   authorize(UserRole.BUSINESS_OWNER, UserRole.SUPER_ADMIN),
   validate(createBusinessSchema),
+  auditMiddleware,
   businessController.create
 );
 router.patch(
@@ -31,6 +33,7 @@ router.patch(
   authorize(UserRole.BUSINESS_OWNER, UserRole.SUPER_ADMIN),
   validate(uuidParamSchema, 'params'),
   validate(updateBusinessSchema),
+  auditMiddleware,
   businessController.update
 );
 

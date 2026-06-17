@@ -1,4 +1,4 @@
-import { Prisma, PrismaClient, UserRole } from '@prisma/client';
+import { PrismaClient, UserRole } from '@prisma/client';
 import { contextStorage, RequestContext } from '../middleware/tenant.middleware';
 import { AppError } from '../utils/AppError';
 
@@ -23,7 +23,7 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 // Models subject to multi-tenant isolation
-export const ISOLATED_MODELS = ['Business', 'Staff', 'Service', 'Resource', 'Appointment'];
+export const ISOLATED_MODELS = ['Business', 'Staff', 'Service', 'Resource', 'Appointment', 'StaffAvailability', 'StaffLeave'];
 
 /**
  * Injects role-based and tenant-based filters into the query's where clause.
@@ -40,6 +40,8 @@ export function injectTenantFilter(
     if (tenantId && ISOLATED_MODELS.includes(model)) {
       if (model === 'Business') {
         return { ...where, id: tenantId };
+      } else if (model === 'StaffAvailability' || model === 'StaffLeave') {
+        return { ...where, staff: { businessId: tenantId } };
       } else {
         return { ...where, businessId: tenantId };
       }
@@ -65,6 +67,13 @@ export function injectTenantFilter(
           ...(tenantId ? { businessId: tenantId } : {}),
           business: { ownerId: userId },
         };
+      case 'StaffAvailability':
+      case 'StaffLeave':
+        return {
+          ...where,
+          ...(tenantId ? { staff: { businessId: tenantId } } : {}),
+          staff: { business: { ownerId: userId } },
+        };
       default:
         return where;
     }
@@ -86,6 +95,13 @@ export function injectTenantFilter(
           ...where,
           ...(tenantId ? { businessId: tenantId } : {}),
           business: { staff: { some: { userId } } },
+        };
+      case 'StaffAvailability':
+      case 'StaffLeave':
+        return {
+          ...where,
+          ...(tenantId ? { staff: { businessId: tenantId } } : {}),
+          staff: { userId },
         };
       case 'Appointment':
         return {
@@ -158,7 +174,7 @@ export const prisma = basePrisma.$extends({
         if (operation === 'create') {
           if (role !== UserRole.SUPER_ADMIN) {
             if (['Staff', 'Service', 'Resource', 'Appointment'].includes(model)) {
-              const businessId = args.data.businessId;
+              const businessId = (args.data as any).businessId;
               if (!businessId) {
                 throw new AppError('Business ID is required', 400);
               }
@@ -192,6 +208,30 @@ export const prisma = basePrisma.$extends({
               if (role === UserRole.BUSINESS_OWNER && args.data.ownerId !== userId) {
                 throw new AppError('Cannot create a business for another owner', 403);
               }
+            } else if (['StaffAvailability', 'StaffLeave'].includes(model)) {
+              const staffId = (args.data as any).staffId;
+              if (!staffId) {
+                throw new AppError('Staff ID is required', 400);
+              }
+
+              const staff = await basePrisma.staff.findUnique({
+                where: { id: staffId },
+                include: { business: true },
+              });
+
+              if (!staff) {
+                throw new AppError('Staff not found', 404);
+              }
+
+              if (role === UserRole.BUSINESS_OWNER) {
+                if (staff.business.ownerId !== userId) {
+                  throw new AppError('Staff not found or access denied', 403);
+                }
+              } else if (role === UserRole.STAFF) {
+                if (staff.userId !== userId) {
+                  throw new AppError('Cannot create record for another staff', 403);
+                }
+              }
             }
           }
           return (basePrisma as any)[model.toLowerCase()][operation](args);
@@ -200,7 +240,7 @@ export const prisma = basePrisma.$extends({
         // 4. For other read/write operations (findFirst, findMany, count, updateMany, deleteMany),
         // inject query filters.
         if (['findFirst', 'findMany', 'count', 'updateMany', 'deleteMany'].includes(operation)) {
-          args.where = injectTenantFilter(model, args.where || {}, ctx as any);
+          (args as any).where = injectTenantFilter(model, (args as any).where || {}, ctx as any);
         }
 
         return (basePrisma as any)[model.toLowerCase()][operation](args);

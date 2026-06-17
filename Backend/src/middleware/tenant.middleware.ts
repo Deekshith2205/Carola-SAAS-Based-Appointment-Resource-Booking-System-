@@ -16,7 +16,7 @@ export const contextStorage = new AsyncLocalStorage<RequestContext>();
 // Regular expression to validate UUIDs
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export async function tenantContext(req: Request, res: Response, next: NextFunction): Promise<void> {
+export async function tenantContext(req: Request, _res: Response, next: NextFunction): Promise<void> {
   let tenantId: string | undefined = undefined;
 
   // 1. Resolve tenant ID (businessId) from headers, params, query, or body

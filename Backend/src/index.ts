@@ -1,9 +1,13 @@
 import app from './app';
 import { env } from './config/env';
 import { disconnectPrisma, prisma } from './prisma/client';
+import { initJobs } from './jobs/reminder.job';
 
 async function startServer(): Promise<void> {
   await prisma.$connect();
+  
+  // Initialize background jobs (e.g., appointment reminders)
+  initJobs();
 
   const server = app.listen(env.PORT, () => {
     console.log(`Server running on port ${env.PORT} (${env.NODE_ENV})`);

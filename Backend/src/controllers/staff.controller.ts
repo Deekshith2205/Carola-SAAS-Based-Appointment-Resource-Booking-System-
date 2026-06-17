@@ -8,6 +8,8 @@ import type { BusinessScopedListQuery } from '../validations/common.validation';
 export const create = asyncHandler(async (req: Request, res: Response) => {
   const staff = await staffService.createStaff(req.user!.id, req.user!.role, req.body);
 
+  req.auditLog = { action: 'STAFF_CREATION', entity: 'Staff', entityId: staff.id };
+
   sendSuccess(res, { staff }, {
     message: 'Staff member added successfully',
     statusCode: 201,
@@ -30,6 +32,8 @@ export const update = asyncHandler(async (req: Request, res: Response) => {
     req.user!.role,
     req.body
   );
+
+  req.auditLog = { action: 'STAFF_UPDATE', entity: 'Staff', entityId: staff.id };
 
   sendSuccess(res, { staff }, { message: 'Staff member updated successfully' });
 });

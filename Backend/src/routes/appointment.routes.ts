@@ -11,6 +11,7 @@ import {
   appointmentListQuerySchema,
   uuidParamSchema,
 } from '../validations/common.validation';
+import { auditMiddleware } from '../middleware/audit.middleware';
 import * as appointmentController from '../controllers/appointment.controller';
 
 const router = Router();
@@ -22,6 +23,7 @@ router.post(
   '/',
   authorize(UserRole.CUSTOMER, UserRole.SUPER_ADMIN),
   validate(createAppointmentSchema),
+  auditMiddleware,
   appointmentController.create
 );
 router.get('/', validate(appointmentListQuerySchema, 'query'), appointmentController.list);
@@ -30,11 +32,13 @@ router.patch(
   '/:id',
   validate(uuidParamSchema, 'params'),
   validate(updateAppointmentSchema),
+  auditMiddleware,
   appointmentController.update
 );
 router.patch(
   '/:id/cancel',
   validate(uuidParamSchema, 'params'),
+  auditMiddleware,
   appointmentController.cancel
 );
 

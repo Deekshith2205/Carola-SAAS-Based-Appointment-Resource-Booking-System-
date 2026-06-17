@@ -8,6 +8,8 @@ import type { AppointmentListQuery } from '../validations/common.validation';
 export const create = asyncHandler(async (req: Request, res: Response) => {
   const appointment = await appointmentService.createAppointment(req.user!.id, req.body);
 
+  req.auditLog = { action: 'APPOINTMENT_CREATION', entity: 'Appointment', entityId: appointment.id };
+
   sendSuccess(res, { appointment }, {
     message: 'Appointment booked successfully',
     statusCode: 201,
@@ -46,6 +48,8 @@ export const update = asyncHandler(async (req: Request, res: Response) => {
     req.body
   );
 
+  req.auditLog = { action: 'APPOINTMENT_UPDATE', entity: 'Appointment', entityId: appointment.id };
+
   sendSuccess(res, { appointment }, { message: 'Appointment updated successfully' });
 });
 
@@ -55,6 +59,8 @@ export const cancel = asyncHandler(async (req: Request, res: Response) => {
     req.user!.id,
     req.user!.role
   );
+
+  req.auditLog = { action: 'APPOINTMENT_CANCELLATION', entity: 'Appointment', entityId: appointment.id };
 
   sendSuccess(res, { appointment }, { message: 'Appointment cancelled successfully' });
 });

@@ -8,6 +8,8 @@ import resourceRoutes from './resource.routes';
 import notificationRoutes from './notification.routes';
 import staffAvailabilityRoutes from './staffAvailability.routes';
 import staffLeaveRoutes from './staffLeave.routes';
+import dashboardRoutes from './dashboard.routes';
+import superAdminRoutes from './superAdmin.routes';
 
 const router = Router();
 
@@ -20,5 +22,7 @@ router.use('/resources', resourceRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/staff-availability', staffAvailabilityRoutes);
 router.use('/staff-leave', staffLeaveRoutes);
+router.use('/dashboard', dashboardRoutes);
+router.use('/super-admin', superAdminRoutes);
 
 export default router;

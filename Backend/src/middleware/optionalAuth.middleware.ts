@@ -1,5 +1,4 @@
 import { NextFunction, Request, Response } from 'express';
-import jwt from 'jsonwebtoken';
 import { verifyToken } from '../utils/jwt';
 
 /** Attach user when a valid Bearer token is present; continue as guest otherwise. */

@@ -12,6 +12,7 @@ import {
   createResourceSchema,
   updateResourceSchema,
 } from '../validations/resource.validation';
+import { auditMiddleware } from '../middleware/audit.middleware';
 import * as resourceController from '../controllers/resource.controller';
 
 const router = Router();
@@ -28,11 +29,12 @@ router.use(authenticate);
 router.use(tenantContext);
 router.use(authorize(UserRole.BUSINESS_OWNER, UserRole.SUPER_ADMIN));
 
-router.post('/', validate(createResourceSchema), resourceController.create);
+router.post('/', validate(createResourceSchema), auditMiddleware, resourceController.create);
 router.patch(
   '/:id',
   validate(uuidParamSchema, 'params'),
   validate(updateResourceSchema),
+  auditMiddleware,
   resourceController.update
 );
 router.delete('/:id', validate(uuidParamSchema, 'params'), resourceController.remove);

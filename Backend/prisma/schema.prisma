@@ -81,6 +81,22 @@ enum LeaveStatus {
 // Models
 // ---------------------------------------------------------------------------
 
+enum AuditAction {
+  LOGIN
+  REGISTER
+  BUSINESS_CREATION
+  BUSINESS_UPDATE
+  STAFF_CREATION
+  STAFF_UPDATE
+  RESOURCE_CREATION
+  RESOURCE_UPDATE
+  APPOINTMENT_CREATION
+  APPOINTMENT_UPDATE
+  APPOINTMENT_CANCELLATION
+  RESOURCE_MODIFICATION
+  OTHER
+}
+
 model User {
   id        String   @id @default(uuid()) @db.Uuid
   name      String
@@ -90,11 +106,12 @@ model User {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  ownedBusinesses Business[]    @relation("BusinessOwner")
+  ownedBusinesses Business[]     @relation("BusinessOwner")
   staffProfiles   Staff[]
-  appointments    Appointment[] @relation("CustomerAppointments")
+  appointments    Appointment[]  @relation("CustomerAppointments")
   notifications   Notification[]
-  reviewedLeaves  StaffLeave[]  @relation("LeaveReviewer")
+  reviewedLeaves  StaffLeave[]   @relation("LeaveReviewer")
+  auditLogs       AuditLog[]
 
   @@index([role])
   @@map("users")
@@ -130,8 +147,8 @@ model Staff {
   availabilityStatus AvailabilityStatus @default(AVAILABLE) @map("availability_status")
   createdAt          DateTime           @default(now()) @map("created_at")
 
-  business     Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  business     Business            @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   appointments Appointment[]
   availability StaffAvailability[]
   leaves       StaffLeave[]
@@ -227,18 +244,18 @@ model StaffAvailability {
 }
 
 model StaffLeave {
-  id          String      @id @default(uuid()) @db.Uuid
-  staffId     String      @map("staff_id") @db.Uuid
-  leaveDate   DateTime    @map("leave_date") @db.Date
-  reason      String?
-  status      LeaveStatus @default(PENDING)
-  reviewedBy  String?     @map("reviewed_by") @db.Uuid
-  reviewedAt  DateTime?   @map("reviewed_at")
-  createdAt   DateTime    @default(now()) @map("created_at")
-  updatedAt   DateTime    @updatedAt @map("updated_at")
+  id         String      @id @default(uuid()) @db.Uuid
+  staffId    String      @map("staff_id") @db.Uuid
+  leaveDate  DateTime    @map("leave_date") @db.Date
+  reason     String?
+  status     LeaveStatus @default(PENDING)
+  reviewedBy String?     @map("reviewed_by") @db.Uuid
+  reviewedAt DateTime?   @map("reviewed_at")
+  createdAt  DateTime    @default(now()) @map("created_at")
+  updatedAt  DateTime    @updatedAt @map("updated_at")
 
-  staff    Staff  @relation(fields: [staffId], references: [id], onDelete: Cascade)
-  reviewer User?  @relation("LeaveReviewer", fields: [reviewedBy], references: [id], onDelete: SetNull)
+  staff    Staff @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  reviewer User? @relation("LeaveReviewer", fields: [reviewedBy], references: [id], onDelete: SetNull)
 
   @@unique([staffId, leaveDate])
   @@index([staffId])
@@ -248,18 +265,48 @@ model StaffLeave {
   @@map("staff_leave")
 }
 
+enum NotificationType {
+  SYSTEM
+  APPOINTMENT_CREATED
+  APPOINTMENT_CONFIRMED
+  APPOINTMENT_CANCELLED
+  APPOINTMENT_REMINDER
+}
+
 model Notification {
-  id        String   @id @default(uuid()) @db.Uuid
-  userId    String   @map("user_id") @db.Uuid
-  title     String
-  message   String
-  isRead    Boolean  @default(false) @map("is_read")
-  createdAt DateTime @default(now()) @map("created_at")
+  id          String           @id @default(uuid()) @db.Uuid
+  userId      String           @map("user_id") @db.Uuid
+  type        NotificationType @default(SYSTEM)
+  title       String
+  message     String
+  referenceId String?          @map("reference_id") @db.Uuid
+  isRead      Boolean          @default(false) @map("is_read")
+  createdAt   DateTime         @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([userId, isRead])
   @@index([createdAt])
+  @@index([referenceId])
   @@map("notifications")
+}
+
+model AuditLog {
+  id        String      @id @default(uuid()) @db.Uuid
+  userId    String?     @map("user_id") @db.Uuid
+  action    AuditAction
+  entity    String
+  entityId  String?     @map("entity_id")
+  details   Json?
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([entity])
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
 }

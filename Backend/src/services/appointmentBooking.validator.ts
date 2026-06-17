@@ -14,8 +14,6 @@ import {
 } from '../utils/appointmentHelpers';
 import { formatDateLabel, formatTimeLabel } from '../utils/dateTime';
 import { isStaffAvailableAtSlot } from './staffAvailability.service';
-import type { CreateAppointmentInput, UpdateAppointmentInput } from '../validations/appointment.validation';
-
 // ---------------------------------------------------------------------------
 // Booking Validation Error — aggregates all validation failures together
 // ---------------------------------------------------------------------------
@@ -514,7 +512,7 @@ export async function validateBookingSlot(
 export async function runSerializableTransaction<T>(
   fn: (tx: PrismaTransactionClient) => Promise<T>
 ): Promise<T> {
-  return prisma.$transaction(fn, {
+  return (prisma as any).$transaction(fn as any, {
     isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
   });
 }

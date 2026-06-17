@@ -11,6 +11,8 @@ import type { BusinessListQuery } from '../validations/common.validation';
 export const create = asyncHandler(async (req: Request, res: Response) => {
   const business = await businessService.createBusiness(req.user!.id, req.body);
 
+  req.auditLog = { action: 'BUSINESS_CREATION', entity: 'Business', entityId: business.id };
+
   sendSuccess(res, { business }, {
     message: 'Business created successfully',
     statusCode: 201,
@@ -44,6 +46,8 @@ export const update = asyncHandler(async (req: Request, res: Response) => {
   }
 
   const business = await businessService.updateBusiness(req.params.id, req.body);
+
+  req.auditLog = { action: 'BUSINESS_UPDATE', entity: 'Business', entityId: business.id };
 
   sendSuccess(res, { business }, { message: 'Business updated successfully' });
 });

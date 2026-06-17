@@ -4,11 +4,11 @@ import { AppError } from '../utils/AppError';
 import { parseAppointmentDate, toTimeDate } from '../utils/dateTime';
 import { paginateQuery, PaginationParams } from '../utils/pagination';
 import {
+  BookingContext,
   runSerializableTransaction,
   validateAppointmentBooking,
-  BookingContext,
 } from './appointmentBooking.validator';
-import { createNotification } from './notification.service';
+import { dispatchAppointmentEvent } from './notificationDispatcher';
 import type { CreateAppointmentInput, UpdateAppointmentInput } from '../validations/appointment.validation';
 
 // ---------------------------------------------------------------------------
@@ -35,45 +35,7 @@ const appointmentInclude = {
 // Notifications
 // ---------------------------------------------------------------------------
 
-async function notifyAppointmentCreated(
-  customerId: string,
-  ownerId: string,
-  businessName: string,
-  appointmentDate: string
-): Promise<void> {
-  await Promise.all([
-    createNotification(
-      customerId,
-      'Appointment booked',
-      `Your appointment at ${businessName} on ${appointmentDate} has been received.`
-    ),
-    createNotification(
-      ownerId,
-      'New appointment',
-      `A new appointment was booked for ${businessName} on ${appointmentDate}.`
-    ),
-  ]);
-}
-
-async function notifyAppointmentUpdated(
-  customerId: string,
-  ownerId: string,
-  businessName: string,
-  appointmentDate: string
-): Promise<void> {
-  await Promise.all([
-    createNotification(
-      customerId,
-      'Appointment updated',
-      `Your appointment at ${businessName} on ${appointmentDate} has been updated.`
-    ),
-    createNotification(
-      ownerId,
-      'Appointment updated',
-      `An appointment at ${businessName} on ${appointmentDate} was modified.`
-    ),
-  ]);
-}
+// Legacy notification helpers removed in favor of dispatchAppointmentEvent
 
 // ---------------------------------------------------------------------------
 // Create Appointment
@@ -95,9 +57,9 @@ export async function createAppointment(customerId: string, input: CreateAppoint
     endTime,
   };
 
-  const { appointment, businessName, ownerId } = await runSerializableTransaction(async (tx) => {
+  const appointment = await runSerializableTransaction(async (tx) => {
     // Run all validations (existence + conflict) in a single aggregated pass
-    const { business } = await validateAppointmentBooking(tx, ctx);
+    await validateAppointmentBooking(tx, ctx);
 
     const appointment = await tx.appointment.create({
       data: {
@@ -113,15 +75,11 @@ export async function createAppointment(customerId: string, input: CreateAppoint
       include: appointmentInclude,
     });
 
-    return {
-      appointment,
-      businessName: business.businessName,
-      ownerId: business.ownerId,
-    };
+    return appointment;
   });
 
   // Send notifications outside the transaction
-  await notifyAppointmentCreated(customerId, ownerId, businessName, input.appointmentDate);
+  await dispatchAppointmentEvent(appointment.id, 'APPOINTMENT_CREATED' as any);
 
   return appointment;
 }
@@ -278,9 +236,9 @@ export async function updateAppointment(
       excludeAppointmentId: appointmentId,
     };
 
-    const { appointment, businessName, ownerId } = await runSerializableTransaction(async (tx) => {
+    const appointment = await runSerializableTransaction(async (tx) => {
       // Re-validate with full conflict detection on updated slot
-      const { business } = await validateAppointmentBooking(tx, ctx);
+      await validateAppointmentBooking(tx, ctx);
 
       const appointment = await tx.appointment.update({
         where: { id: appointmentId },
@@ -295,29 +253,37 @@ export async function updateAppointment(
         include: appointmentInclude,
       });
 
-      return {
-        appointment,
-        businessName: business.businessName,
-        ownerId: business.ownerId,
-      };
+      return appointment;
     });
 
-    await notifyAppointmentUpdated(
-      existing.customerId,
-      ownerId,
-      businessName,
-      input.appointmentDate ?? existing.appointmentDate.toISOString().slice(0, 10)
-    );
+    // Only notify if status changed
+    if (input.status === 'CONFIRMED') {
+      await dispatchAppointmentEvent(appointmentId, 'APPOINTMENT_CONFIRMED' as any);
+    } else if (input.status === 'CANCELLED') {
+      await dispatchAppointmentEvent(appointmentId, 'APPOINTMENT_CANCELLED' as any);
+    } else {
+      await dispatchAppointmentEvent(appointmentId, 'SYSTEM' as any);
+    }
 
     return appointment;
   }
 
   // Status-only update — no re-validation needed
-  return prisma.appointment.update({
+  const appointment = await prisma.appointment.update({
     where: { id: appointmentId },
     data: { status: input.status },
     include: appointmentInclude,
   });
+
+  if (input.status === 'CONFIRMED' && existing.status !== 'CONFIRMED') {
+    await dispatchAppointmentEvent(appointmentId, 'APPOINTMENT_CONFIRMED' as any);
+  } else if (input.status === 'CANCELLED' && existing.status !== 'CANCELLED') {
+    await dispatchAppointmentEvent(appointmentId, 'APPOINTMENT_CANCELLED' as any);
+  } else if (input.status && input.status !== existing.status) {
+    await dispatchAppointmentEvent(appointmentId, 'SYSTEM' as any);
+  }
+
+  return appointment;
 }
 
 // ---------------------------------------------------------------------------
