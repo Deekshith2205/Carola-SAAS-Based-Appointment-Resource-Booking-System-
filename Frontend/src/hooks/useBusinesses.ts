@@ -31,10 +31,11 @@ export function useAllBusinesses(params?: { page?: number; limit?: number }) {
   });
 }
 
-export function usePlatformStatistics() {
+export function usePlatformStatistics(enabled = false) {
   return useQuery({
     queryKey: businessKeys.stats,
     queryFn: () => superAdminService.getStatistics(),
+    enabled,
   });
 }
 

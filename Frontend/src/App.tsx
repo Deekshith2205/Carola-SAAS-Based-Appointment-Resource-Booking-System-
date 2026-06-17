@@ -1,4 +1,3 @@
-import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from './context/AuthContext';
@@ -15,6 +14,8 @@ import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
 import Dashboard from './pages/Dashboard';
 import Unauthorized from './pages/Unauthorized';
+import AppointmentsPage from './pages/Appointments';
+import StaffPage from './pages/Staff';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -53,8 +54,8 @@ export default function App() {
                 <Route path="dashboard" element={<Dashboard />} />
 
                 {/* Placeholder routes – add real pages as they're built */}
-                <Route path="appointments" element={<PlaceholderPage title="Appointments" />} />
-                <Route path="staff"        element={<PlaceholderPage title="Staff" />} />
+                <Route path="appointments" element={<AppointmentsPage />} />
+                <Route path="staff"        element={<StaffPage />} />
                 <Route path="services"     element={<PlaceholderPage title="Services" />} />
                 <Route path="resources"    element={<PlaceholderPage title="Resources" />} />
                 <Route path="analytics"    element={<PlaceholderPage title="Analytics" />} />
