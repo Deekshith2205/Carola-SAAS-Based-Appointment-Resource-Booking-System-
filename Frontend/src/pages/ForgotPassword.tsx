@@ -3,20 +3,16 @@ import { Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
+import { MailCheck, ArrowLeft } from 'lucide-react';
 import { getErrorMessage } from '../utils';
 import { toast } from 'sonner';
 
 import { Button } from '../components/ui/button';
 import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
+  Form, FormControl, FormField, FormItem, FormLabel, FormMessage,
 } from '../components/ui/form';
 import { Input } from '../components/ui/input';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '../components/ui/card';
+import { LoadingSpinner } from '../components/common';
 
 const forgotPasswordSchema = z.object({
   email: z.string().email({ message: 'Please enter a valid email address.' }),
@@ -38,9 +34,6 @@ export default function ForgotPassword() {
   const onSubmit = async () => {
     setIsLoading(true);
     try {
-      // TODO: Replace with actual backend API call once implemented
-      // await api.post('/auth/forgot-password', { email: values.email });
-      
       // Simulate network request
       await new Promise((resolve) => setTimeout(resolve, 1500));
       
@@ -53,59 +46,69 @@ export default function ForgotPassword() {
     }
   };
 
-  return (
-    <div className="mx-auto w-full max-w-md">
-      <Card>
-        <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold">Reset password</CardTitle>
-          <CardDescription>
-            {isSubmitted 
-              ? "Check your email for a link to reset your password. If it doesn't appear within a few minutes, check your spam folder."
-              : "Enter your email address and we'll send you a link to reset your password."}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {!isSubmitted ? (
-            <Form {...form}>
-              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                <FormField
-                  control={form.control}
-                  name="email"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Email</FormLabel>
-                      <FormControl>
-                        <Input placeholder="m@example.com" {...field} disabled={isLoading} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                
-                <Button type="submit" className="w-full mt-4" disabled={isLoading}>
-                  {isLoading ? 'Sending reset link...' : 'Send reset link'}
-                </Button>
-              </form>
-            </Form>
-          ) : (
-            <Button 
-              variant="outline" 
-              className="w-full" 
-              onClick={() => {
-                setIsSubmitted(false);
-                form.reset();
-              }}
-            >
-              Try another email
-            </Button>
-          )}
-        </CardContent>
-        <CardFooter className="flex justify-center border-t p-4">
-          <Link to="/login" className="text-sm font-medium text-primary hover:underline flex items-center gap-2">
-            &larr; Back to login
+  if (isSubmitted) {
+    return (
+      <div className="w-full text-center animate-in fade-in zoom-in-95 duration-500">
+        <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 mb-6 shadow-sm">
+          <MailCheck size={40} strokeWidth={1.5} />
+        </div>
+        <h1 className="text-3xl font-bold tracking-tight text-foreground">Check your email</h1>
+        <p className="text-muted-foreground mt-3 max-w-sm mx-auto leading-relaxed">
+          We sent a password reset link to <span className="font-medium text-foreground">{form.getValues('email')}</span>
+        </p>
+        <Button 
+          variant="outline" 
+          className="mt-8 w-full h-11 text-base font-medium" 
+          onClick={() => {
+            setIsSubmitted(false);
+            form.reset();
+          }}
+        >
+          Try another email
+        </Button>
+        <div className="mt-8">
+          <Link to="/login" className="text-sm font-medium text-primary hover:underline underline-offset-4 flex items-center justify-center gap-2">
+            <ArrowLeft size={14} /> Back to login
           </Link>
-        </CardFooter>
-      </Card>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div className="mb-8 text-center lg:text-left">
+        <h1 className="text-3xl font-bold tracking-tight text-foreground">Reset password</h1>
+        <p className="text-muted-foreground mt-2">Enter your email address and we'll send you a link to reset your password.</p>
+      </div>
+
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">
+          <FormField
+            control={form.control}
+            name="email"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Email address</FormLabel>
+                <FormControl>
+                  <Input placeholder="name@example.com" {...field} disabled={isLoading} autoFocus />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          
+          <Button type="submit" className="w-full h-11 text-base font-medium mt-2" disabled={isLoading}>
+            {isLoading ? <LoadingSpinner size="sm" className="text-primary-foreground border-t-white" /> : 'Send reset link'}
+          </Button>
+        </form>
+      </Form>
+
+      <div className="mt-8 text-center">
+        <Link to="/login" className="text-sm font-medium text-primary hover:underline underline-offset-4 flex items-center justify-center gap-2 lg:justify-start">
+          <ArrowLeft size={14} /> Back to login
+        </Link>
+      </div>
     </div>
   );
 }

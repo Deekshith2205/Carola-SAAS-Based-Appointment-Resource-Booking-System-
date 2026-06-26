@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import { useSidebar } from '../hooks/useSidebar';
 import { Sidebar, Navbar } from '../components/layout';
-import { cn } from '../lib/utils';
 
 export default function DashboardLayout() {
   const { isCollapsed, toggle } = useSidebar();
@@ -21,20 +20,12 @@ export default function DashboardLayout() {
       )}
 
       {/* ── Sidebar ── */}
-      {/* Desktop: always visible, collapses to icon strip */}
-      <div className="hidden md:flex shrink-0">
-        <Sidebar isCollapsed={isCollapsed} onToggle={toggle} />
-      </div>
-
-      {/* Mobile: off-canvas drawer */}
-      <div
-        className={cn(
-          'fixed inset-y-0 left-0 z-30 flex md:hidden transition-transform duration-300 ease-in-out',
-          mobileOpen ? 'translate-x-0' : '-translate-x-full'
-        )}
-      >
-        <Sidebar isCollapsed={false} onToggle={() => setMobileOpen(false)} />
-      </div>
+      <Sidebar 
+        isCollapsed={isCollapsed} 
+        onToggle={toggle} 
+        mobileOpen={mobileOpen}
+        onMobileClose={() => setMobileOpen(false)}
+      />
 
       {/* ── Main content area ── */}
       <div className="flex flex-1 flex-col min-w-0 overflow-hidden">

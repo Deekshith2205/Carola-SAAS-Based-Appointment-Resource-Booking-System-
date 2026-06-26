@@ -260,3 +260,39 @@ button, a, input, select, textarea {
     box-shadow 0.15s ease,
     opacity 0.15s ease;
 }
+
+/* ─────────────────────────────────────────────
+   Shimmer skeleton animation
+───────────────────────────────────────────── */
+@keyframes shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* ─────────────────────────────────────────────
+   Focus visible — consistent ring across app
+───────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid hsl(var(--ring, 243 75% 59%));
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ─────────────────────────────────────────────
+   Scrollbar — thin, themed
+───────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: hsl(214 32% 82%); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: hsl(214 32% 65%); }
+.dark ::-webkit-scrollbar-thumb { background: hsl(215 20% 30%); }
+
+/* ─────────────────────────────────────────────
+   Hide scrollbar utility
+───────────────────────────────────────────── */
+.hide-scrollbar::-webkit-scrollbar { display: none; }
+.hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
