@@ -3,6 +3,8 @@ import { prisma } from '../prisma/client';
 import { AppError } from '../utils/AppError';
 import { assertCanManageBusiness } from './businessAccess.service';
 import { paginateQuery, PaginationParams } from '../utils/pagination';
+import { hashPassword } from '../utils/password';
+import crypto from 'crypto';
 import type { CreateStaffInput, UpdateStaffInput } from '../validations/staff.validation';
 
 const staffInclude = {
@@ -17,18 +19,28 @@ const staffInclude = {
 export async function createStaff(userId: string, role: UserRole, input: CreateStaffInput) {
   await assertCanManageBusiness(input.businessId, userId, role);
 
-  const user = await prisma.user.findUnique({
-    where: { id: input.userId },
+  let user = await prisma.user.findUnique({
+    where: { email: input.email },
   });
 
   if (!user) {
-    throw new AppError('User not found', 404);
+    const rawPassword = crypto.randomBytes(16).toString('hex') + 'A1!'; // ensure it passes strong regex if needed
+    const hashedPassword = await hashPassword(rawPassword);
+    
+    user = await prisma.user.create({
+      data: {
+        email: input.email,
+        name: input.name,
+        password: hashedPassword,
+        role: 'STAFF',
+      },
+    });
   }
 
   return prisma.staff.create({
     data: {
       businessId: input.businessId,
-      userId: input.userId,
+      userId: user.id,
       designation: input.designation,
       availabilityStatus: input.availabilityStatus,
     },

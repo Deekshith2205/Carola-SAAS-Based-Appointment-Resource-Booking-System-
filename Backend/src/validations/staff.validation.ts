@@ -3,7 +3,8 @@ import { AvailabilityStatus } from '@prisma/client';
 
 export const createStaffSchema = z.object({
   businessId: z.string().uuid(),
-  userId: z.string().uuid(),
+  email: z.string().email(),
+  name: z.string().min(2).max(100),
   designation: z.string().trim().max(100).optional(),
   availabilityStatus: z.nativeEnum(AvailabilityStatus).optional(),
 });
