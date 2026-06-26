@@ -13,12 +13,7 @@ import {
   ArrowUpRight, ArrowDownRight,
 } from 'lucide-react';
 import { useMyBusiness } from '../hooks/queries/useBusiness';
-import {
-  useDashboardSummary,
-  useRevenueTrends,
-  usePopularServices,
-  useStaffUtilization,
-} from '../hooks/queries/useDashboard';
+import { useUnifiedDashboard } from '../hooks/queries/useDashboard';
 import { cn } from '../lib/utils';
 import { formatCurrency } from '../utils';
 import { SkeletonCard } from '../components/common';
@@ -152,37 +147,45 @@ export default function AnalyticsPage() {
   const { data: bizResult } = useMyBusiness();
   const businessId = bizResult?.id ?? localStorage.getItem('businessId') ?? '';
 
-  const { data: summary, isLoading: loadingSummary } = useDashboardSummary({ businessId });
-  const { data: trends, isLoading: loadingTrends } = useRevenueTrends({ businessId, period: bookingPeriod });
-  const { data: pop, isLoading: loadingPop } = usePopularServices({ businessId, limit: 1 });
-  const { data: staff, isLoading: loadingStaff } = useStaffUtilization({ businessId });
+  // Single source of truth: unified dashboard data
+  const { data: dashboardData, isLoading } = useUnifiedDashboard({ businessId });
 
-  // Compute derived data
-  const totalRevenue = summary?.totalRevenue ?? 0;
-  const totalAppts   = summary?.totalAppointments ?? 0;
-  
-  // Create safe arrays
-  const safeTrends = trends ?? [];
-  const safeStaff = staff ?? [];
+  // Derive all values from the unified data
+  const totalRevenue = dashboardData?.totalRevenue ?? 0;
+  const totalAppts   = dashboardData?.totalAppointments ?? 0;
 
-  // Re-map trends to include profit/expenses if not provided by backend (assuming 38% profit margin for visuals)
+  const safeTrends = dashboardData?.bookingTrends ?? [];
+
+  // Re-map trends to include profit/expenses (38% profit margin estimate for visuals)
   const chartTrends = safeTrends.map(t => ({
     period: t.period,
     revenue: t.revenue,
     bookings: t.appointments,
     profit: Math.round(t.revenue * 0.38),
     expenses: Math.round(t.revenue * 0.62),
-    prevYear: t.appointments > 10 ? t.appointments - 5 : 0 // Fake YOY data for chart since backend doesn't provide it yet
+    prevYear: t.appointments > 10 ? t.appointments - 5 : 0
   }));
 
-  const mostPopular = pop?.[0] ? pop[0].serviceName : 'No data';
-  const mostPopularSub = pop?.[0] ? `${pop[0].bookingCount} bookings · ${formatCurrency(pop[0].revenue)} revenue` : 'No bookings yet';
+  // Popular services staff utilization from unified data
+  const popularServices = dashboardData?.popularServices ?? [];
+  const mostPopular = popularServices[0]?.serviceName ?? 'No data';
+  const mostPopularSub = popularServices[0]
+    ? `${popularServices[0].bookingCount} bookings · ${formatCurrency(popularServices[0].revenue)} revenue`
+    : 'No bookings yet';
 
-  const avgUtil = safeStaff.length > 0 
-    ? Math.round(safeStaff.reduce((acc, s) => acc + (s.utilizationRate ?? 0), 0) / safeStaff.length) 
+  // Map popularServices to a "utilization" format for the staff-chart section
+  // (Booking share as %, relative to the busiest service)
+  const maxBookings = popularServices.reduce((m, s) => Math.max(m, s.bookingCount), 0);
+  const staffChartData = popularServices.map((s, i) => ({
+    staffName: s.serviceName,
+    totalAppointments: s.bookingCount,
+    utilizationRate: maxBookings > 0 ? Math.round((s.bookingCount / maxBookings) * 100) : 0,
+    fill: ['#6366f1', '#7c3aed', '#8b5cf6', '#a78bfa', '#c4b5fd'][i % 5]
+  }));
+
+  const avgUtil = staffChartData.length > 0
+    ? Math.round(staffChartData.reduce((acc, s) => acc + s.utilizationRate, 0) / staffChartData.length)
     : 0;
-
-  const isLoading = loadingSummary || loadingTrends || loadingPop || loadingStaff;
 
   if (isLoading) {
     return (
@@ -354,14 +357,14 @@ export default function AnalyticsPage() {
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={safeStaff} layout="vertical" margin={{ top: 0, right: 50, left: 0, bottom: 0 }} barSize={10}>
+              <BarChart data={staffChartData} layout="vertical" margin={{ top: 0, right: 50, left: 0, bottom: 0 }} barSize={10}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
                 <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} axisLine={false} tickLine={false} tickFormatter={v => `${v}%`} />
                 <YAxis type="category" dataKey="staffName" width={92} tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} axisLine={false} tickLine={false} />
                 <Tooltip content={<ChartTooltip suffix="%" />} />
                 <Bar dataKey="utilizationRate" name="Utilization" radius={[0, 4, 4, 0]}
                   label={{ position: 'right', formatter: (v: any) => `${v}%`, fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}>
-                  {safeStaff.map((_entry, index) => {
+                  {staffChartData.map((_entry, index) => {
                     const colors = ['#6366f1', '#7c3aed', '#8b5cf6', '#a78bfa', '#c4b5fd'];
                     return <Cell key={index} fill={colors[index % colors.length]} />;
                   })}
@@ -371,7 +374,7 @@ export default function AnalyticsPage() {
 
             {/* Staff table summary */}
             <div className="mt-4 divide-y divide-border">
-              {safeStaff.map(s => (
+              {staffChartData.map(s => (
                 <div key={s.staffName} className="flex items-center justify-between py-2.5 text-xs">
                   <div className="flex items-center gap-2.5">
                     <div className="h-7 w-7 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-xs">

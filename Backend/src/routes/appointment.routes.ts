@@ -6,6 +6,8 @@ import { validate } from '../middleware/validate.middleware';
 import {
   createAppointmentSchema,
   updateAppointmentSchema,
+  updateAppointmentStatusSchema,
+  appointmentSlotQuerySchema,
 } from '../validations/appointment.validation';
 import {
   appointmentListQuerySchema,
@@ -21,13 +23,21 @@ router.use(tenantContext);
 
 router.post(
   '/',
-  authorize(UserRole.CUSTOMER, UserRole.SUPER_ADMIN),
+  authorize(UserRole.CUSTOMER, UserRole.BUSINESS_OWNER, UserRole.STAFF, UserRole.SUPER_ADMIN),
   validate(createAppointmentSchema),
   auditMiddleware,
   appointmentController.create
 );
 router.get('/', validate(appointmentListQuerySchema, 'query'), appointmentController.list);
+router.get('/slots', validate(appointmentSlotQuerySchema, 'query'), appointmentController.getSlots);
 router.get('/:id', validate(uuidParamSchema, 'params'), appointmentController.getById);
+router.patch(
+  '/:id/status',
+  validate(uuidParamSchema, 'params'),
+  validate(updateAppointmentStatusSchema),
+  auditMiddleware,
+  appointmentController.updateStatus
+);
 router.patch(
   '/:id',
   validate(uuidParamSchema, 'params'),

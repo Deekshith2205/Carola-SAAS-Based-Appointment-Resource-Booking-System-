@@ -64,6 +64,7 @@ const STAFF_STATUS_MESSAGES: Record<Exclude<AvailabilityStatus, 'AVAILABLE'>, st
   UNAVAILABLE: 'The selected staff member is marked as unavailable',
   BUSY: 'The selected staff member is currently busy and cannot be booked',
   ON_LEAVE: 'The selected staff member is on leave and cannot be booked',
+  OFF_DUTY: 'The selected staff member is off duty and cannot be booked',
 };
 
 const RESOURCE_STATUS_MESSAGES: Record<Exclude<ResourceStatus, 'AVAILABLE'>, string> = {
@@ -513,6 +514,8 @@ export async function runSerializableTransaction<T>(
   fn: (tx: PrismaTransactionClient) => Promise<T>
 ): Promise<T> {
   return (prisma as any).$transaction(fn as any, {
+    maxWait: 15000, // 15 seconds max wait to start transaction
+    timeout: 30000, // 30 seconds max timeout for the transaction
     isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
   });
 }

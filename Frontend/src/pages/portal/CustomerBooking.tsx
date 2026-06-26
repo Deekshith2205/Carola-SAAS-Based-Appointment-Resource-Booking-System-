@@ -10,9 +10,9 @@ import { cn } from '../../lib/utils';
 import { useAuth } from '../../context/AuthContext';
 import { useServices } from '../../hooks/queries/useServices';
 import { useStaffList } from '../../hooks/queries/useStaff';
-import { useStaffAvailability, DayOfWeek } from '../../hooks/queries/useStaffAvailability';
+import { useAvailableSlots } from '../../hooks/queries/useAvailableSlots';
 import { useCreateAppointment } from '../../hooks/queries/useAppointments';
-import { getBusinessId } from '../../hooks/queries/useBusiness';
+import { useMyBusiness } from '../../hooks/queries/useBusiness';
 import { formatCurrency } from '../../utils';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
@@ -67,7 +67,8 @@ function StepIndicator({ current }: { current: number }) {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function CustomerBooking() {
   const { user } = useAuth();
-  const businessId = getBusinessId();
+  const { data: business, isLoading: loadingBusiness } = useMyBusiness();
+  const businessId = business?.id;
 
   const { data: srvData, isLoading: loadingSrv } = useServices();
   const { data: stfData, isLoading: loadingStf }  = useStaffList();
@@ -79,7 +80,12 @@ export default function CustomerBooking() {
   const [step, setStep]                 = useState(0);
   const [selectedService, setSelectedService] = useState<typeof services[0] | null>(null);
   const [selectedStaff, setSelectedStaff]     = useState<typeof staff[0] | null>(null);
-  const { data: availData, isLoading: loadingAvail } = useStaffAvailability(selectedStaff?.id);
+
+  // Filter staff based on the selected service
+  const filteredStaff = useMemo(() => {
+    if (!selectedService) return staff;
+    return staff.filter(s => s.services?.some(srv => srv.id === selectedService.id));
+  }, [staff, selectedService]);
 
   const [weekBase, setWeekBase]         = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
@@ -97,27 +103,15 @@ export default function CustomerBooking() {
   const weekDays = getWeekDays(weekBase);
   const today    = new Date(); today.setHours(0, 0, 0, 0);
 
-  const availableSlots = useMemo(() => {
-    if (!selectedDate) return [];
-    if (!selectedStaff) return ['09:00','09:30','10:00','10:30','11:00','11:30','13:00','13:30','14:00','14:30','15:00','15:30','16:00'];
-    if (!availData || availData.length === 0) return [];
-    const daysMap: Record<number, DayOfWeek> = {
-      0:'SUNDAY',1:'MONDAY',2:'TUESDAY',3:'WEDNESDAY',4:'THURSDAY',5:'FRIDAY',6:'SATURDAY',
-    };
-    const dayStr  = daysMap[selectedDate.getDay()];
-    const dayAvail = availData.find(a => a.dayOfWeek === dayStr && a.isAvailable);
-    if (!dayAvail) return [];
-    const slots: string[] = [];
-    const [startH, startM] = dayAvail.startTime.split(':').map(Number);
-    const [endH, endM]     = dayAvail.endTime.split(':').map(Number);
-    let curH = startH, curM = startM;
-    while (curH < endH || (curH === endH && curM < endM)) {
-      slots.push(`${String(curH).padStart(2,'0')}:${String(curM).padStart(2,'0')}`);
-      curM += 30;
-      if (curM >= 60) { curH += Math.floor(curM / 60); curM = curM % 60; }
-    }
-    return slots;
-  }, [selectedDate, selectedStaff, availData]);
+  // Fetch available slots dynamically from the backend
+  const { data: slotsData, isLoading: loadingAvail } = useAvailableSlots({
+    businessId: businessId || '',
+    serviceId: selectedService?.id || '',
+    date: selectedDate ? new Date(selectedDate.getTime() - selectedDate.getTimezoneOffset() * 60000).toISOString().split('T')[0] : '',
+    staffId: selectedStaff?.id,
+  });
+
+  const availableSlots = slotsData || [];
 
   const canNext = [
     !!selectedService, true, !!selectedDate && !!selectedTime,
@@ -128,18 +122,38 @@ export default function CustomerBooking() {
     if (!businessId || !selectedService || !selectedDate || !selectedTime) return;
     setApiError(null);
     try {
-      const [hours, minutes] = selectedTime.split(':').map(Number);
-      const startMs = new Date().setHours(hours, minutes, 0, 0);
-      const endMs   = startMs + (selectedService.durationMinutes * 60 * 1000);
-      const endD    = new Date(endMs);
-      const endTime = `${String(endD.getHours()).padStart(2,'0')}:${String(endD.getMinutes()).padStart(2,'0')}`;
+      const durationMinutes = selectedService.durationMinutes || 30;
+      const [startH, startM] = selectedTime.split(':').map(Number);
+      const endTotalMinutes = startH * 60 + startM + durationMinutes;
+      const endTime = `${String(Math.floor(endTotalMinutes / 60) % 24).padStart(2, '0')}:${String(endTotalMinutes % 60).padStart(2, '0')}`;
+      
+      const dateString = new Date(selectedDate.getTime() - selectedDate.getTimezoneOffset() * 60000).toISOString().split('T')[0];
+
       await createReq.mutateAsync({
-        businessId, serviceId: selectedService.id, staffId: selectedStaff?.id,
-        appointmentDate: selectedDate.toISOString(), startTime: selectedTime, endTime,
+        businessId,
+        serviceId: selectedService.id,
+        staffId: selectedStaff?.id || undefined,
+        resourceId: selectedService.defaultResourceId || undefined,
+        appointmentDate: dateString,
+        startTime: selectedTime,
+        endTime,
       });
       setBooked(true);
     } catch (e: any) {
-      setApiError(e.response?.data?.message || e.message || 'Failed to create appointment. There may be a scheduling conflict.');
+      console.error(e);
+      let errMsg = e.response?.data?.message || e.message || 'Failed to create appointment. There may be a scheduling conflict.';
+      const errs = e.response?.data?.errors;
+      if (errs) {
+        if (Array.isArray(errs)) {
+          errMsg = `${errMsg}: ${errs.join(' | ')}`;
+        } else if (typeof errs === 'object') {
+          const fieldMsgs = Object.entries(errs)
+            .map(([field, msgs]) => `${field}: ${(msgs as string[]).join(', ')}`)
+            .join(' | ');
+          errMsg = `${errMsg}: ${fieldMsgs}`;
+        }
+      }
+      setApiError(errMsg);
     }
   };
 
@@ -149,6 +163,14 @@ export default function CustomerBooking() {
     setSelectedDate(null); setSelectedTime(null); setNotes('');
   };
 
+  if (loadingBusiness) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[50vh] text-center gap-4">
+        <p className="text-sm text-muted-foreground">Loading portal...</p>
+      </div>
+    );
+  }
+
   if (!businessId) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[50vh] text-center gap-4">
@@ -156,8 +178,8 @@ export default function CustomerBooking() {
           <Scissors className="h-5 w-5 text-muted-foreground" />
         </div>
         <div>
-          <p className="font-semibold">No Business Selected</p>
-          <p className="text-sm text-muted-foreground max-w-sm mt-1">Visit a specific business booking portal to make an appointment.</p>
+          <p className="font-semibold">No Business Found</p>
+          <p className="text-sm text-muted-foreground max-w-sm mt-1">We couldn't locate the booking service. Please try again later.</p>
         </div>
       </div>
     );
@@ -269,7 +291,7 @@ export default function CustomerBooking() {
                   {selectedStaff === null && <CheckCircle2 className="h-4 w-4 text-primary" />}
                 </button>
 
-                {staff.map(s => (
+                {filteredStaff.map(s => (
                   <button
                     key={s.id}
                     onClick={() => setSelectedStaff(s)}

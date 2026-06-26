@@ -1,5 +1,5 @@
 import { AppointmentStatus, UserRole } from '@prisma/client';
-import { prisma } from '../prisma/client';
+import { prisma, basePrisma } from '../prisma/client';
 import { AppError } from '../utils/AppError';
 import { parseAppointmentDate, toTimeDate } from '../utils/dateTime';
 import { paginateQuery, PaginationParams } from '../utils/pagination';
@@ -9,7 +9,7 @@ import {
   validateAppointmentBooking,
 } from './appointmentBooking.validator';
 import { dispatchAppointmentEvent } from './notificationDispatcher';
-import type { CreateAppointmentInput, UpdateAppointmentInput } from '../validations/appointment.validation';
+import type { CreateAppointmentInput, UpdateAppointmentInput, UpdateAppointmentStatusInput } from '../validations/appointment.validation';
 
 // ---------------------------------------------------------------------------
 // Shared Prisma include shape
@@ -295,7 +295,242 @@ export async function cancelAppointment(
   userId: string,
   role: UserRole
 ) {
-  return updateAppointment(appointmentId, userId, role, {
-    status: AppointmentStatus.CANCELLED,
+  return updateAppointmentStatus(appointmentId, userId, role, { status: AppointmentStatus.CANCELLED });
+}
+
+// ---------------------------------------------------------------------------
+// Update Appointment Status (dedicated, safe status-only update)
+// ---------------------------------------------------------------------------
+
+/**
+ * Valid status transitions enforcing business rules.
+ * Key   = current (from) status
+ * Value = allowed target (to) statuses
+ */
+export const VALID_STATUS_TRANSITIONS: Record<AppointmentStatus, AppointmentStatus[]> = {
+  [AppointmentStatus.PENDING]: [
+    AppointmentStatus.CONFIRMED,
+    AppointmentStatus.CANCELLED,
+    AppointmentStatus.RESCHEDULED,
+  ],
+  [AppointmentStatus.CONFIRMED]: [
+    AppointmentStatus.COMPLETED,
+    AppointmentStatus.CANCELLED,
+    AppointmentStatus.NO_SHOW,
+    AppointmentStatus.RESCHEDULED,
+  ],
+  [AppointmentStatus.RESCHEDULED]: [
+    AppointmentStatus.CONFIRMED,
+    AppointmentStatus.CANCELLED,
+    AppointmentStatus.PENDING,
+  ],
+  // Terminal states — no outbound transitions allowed
+  [AppointmentStatus.COMPLETED]:  [],
+  [AppointmentStatus.CANCELLED]:  [],
+  [AppointmentStatus.NO_SHOW]:    [],
+};
+
+export async function updateAppointmentStatus(
+  appointmentId: string,
+  userId: string,
+  role: UserRole,
+  input: UpdateAppointmentStatusInput
+): Promise<typeof appointmentWithIncludes> {
+  // ── 1. Fetch existing appointment using basePrisma to skip the extension ──
+  // The extended prisma client transforms findUnique → findFirst with injected
+  // tenant filters. We use basePrisma here so the look-up is always by raw ID
+  // and the access check is handled explicitly below.
+  const existing = await basePrisma.appointment.findUnique({
+    where: { id: appointmentId },
+    include: { business: true },
   });
+
+  if (!existing) {
+    throw new AppError('Appointment not found.', 404);
+  }
+
+  // ── 2. Role-based ownership check ──────────────────────────────────────────
+  const canUpdate =
+    role === UserRole.SUPER_ADMIN ||
+    existing.customerId === userId ||
+    existing.business.ownerId === userId;
+
+  if (!canUpdate) {
+    // Also allow the assigned staff member to update status
+    if (role === UserRole.STAFF) {
+      const staffProfile = await basePrisma.staff.findFirst({
+        where: { userId, id: existing.staffId ?? undefined, businessId: existing.businessId },
+      });
+      if (!staffProfile) {
+        throw new AppError('You are not authorised to modify this appointment.', 403);
+      }
+    } else {
+      throw new AppError('You are not authorised to modify this appointment.', 403);
+    }
+  }
+
+  // ── 3. Business rule: terminal state guard ──────────────────────────────────
+  const terminalStatuses: AppointmentStatus[] = [
+    AppointmentStatus.COMPLETED,
+    AppointmentStatus.CANCELLED,
+    AppointmentStatus.NO_SHOW,
+  ];
+
+  if (terminalStatuses.includes(existing.status)) {
+    const labels: Record<AppointmentStatus, string> = {
+      COMPLETED:   'completed',
+      CANCELLED:   'cancelled',
+      NO_SHOW:     'marked as no-show',
+      PENDING:     'pending',
+      CONFIRMED:   'confirmed',
+      RESCHEDULED: 'rescheduled',
+    };
+    throw new AppError(
+      `Appointment has already been ${labels[existing.status]} and cannot be changed.`,
+      409
+    );
+  }
+
+  // ── 4. Transition validation ────────────────────────────────────────────────
+  const allowedTargets = VALID_STATUS_TRANSITIONS[existing.status] ?? [];
+  if (!allowedTargets.includes(input.status)) {
+    throw new AppError(
+      `Invalid status transition: "${existing.status}" → "${input.status}". ` +
+      `Allowed next statuses: ${allowedTargets.length ? allowedTargets.join(', ') : 'none (terminal state)'}.`,
+      422
+    );
+  }
+
+  // ── 5. Persist ──────────────────────────────────────────────────────────────
+  // Use basePrisma.appointment.update directly — this bypasses the extension's
+  // findFirst access-check (which we already did above) and avoids any
+  // tenant-filter injection that could cause a spurious 403.
+  const appointment = await basePrisma.appointment.update({
+    where: { id: appointmentId },
+    data: { status: input.status },
+    include: appointmentInclude,
+  });
+
+  // ── 6. Dispatch notification ────────────────────────────────────────────────
+  if (input.status === AppointmentStatus.CONFIRMED) {
+    await dispatchAppointmentEvent(appointmentId, 'APPOINTMENT_CONFIRMED' as any);
+  } else if (input.status === AppointmentStatus.CANCELLED) {
+    await dispatchAppointmentEvent(appointmentId, 'APPOINTMENT_CANCELLED' as any);
+  } else {
+    await dispatchAppointmentEvent(appointmentId, 'SYSTEM' as any);
+  }
+
+  return appointment;
+}
+
+// Typed return helper — keeps the return type inferred from the include shape
+const appointmentWithIncludes = {} as Awaited<ReturnType<typeof basePrisma.appointment.update<{
+  where: { id: string };
+  data: { status: AppointmentStatus };
+  include: typeof appointmentInclude;
+}>>>;
+
+
+// ---------------------------------------------------------------------------
+// Time Slot Generation
+// ---------------------------------------------------------------------------
+
+export async function getAvailableTimeSlots(
+  businessId: string,
+  serviceId: string,
+  dateStr: string,
+  staffId?: string
+): Promise<string[]> {
+  const appointmentDate = parseAppointmentDate(dateStr);
+  const dow = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"][appointmentDate.getUTCDay()];
+
+  const service = await prisma.service.findFirst({
+    where: { id: serviceId, businessId },
+    select: { durationMinutes: true },
+  });
+
+  if (!service) {
+    throw new AppError('Service not found', 404);
+  }
+
+  const duration = service.durationMinutes;
+
+  // Find target staff
+  let targetStaffIds: string[] = [];
+  if (staffId) {
+    targetStaffIds.push(staffId);
+  } else {
+    const staffList = await prisma.staff.findMany({
+      where: {
+        businessId,
+        services: { some: { id: serviceId } },
+        availabilityStatus: 'AVAILABLE'
+      },
+      select: { id: true }
+    });
+    targetStaffIds = staffList.map(s => s.id);
+  }
+
+  const validSlots = new Set<string>();
+
+  for (const sId of targetStaffIds) {
+    // Check if on leave
+    const leave = await prisma.staffLeave.findFirst({
+      where: { staffId: sId, leaveDate: appointmentDate, status: 'APPROVED' },
+    });
+    if (leave) continue;
+
+    // Check availability for this day
+    const avail = await prisma.staffAvailability.findFirst({
+      where: { staffId: sId, dayOfWeek: dow as any, isActive: true },
+      include: { breaks: true }
+    });
+    if (!avail) continue;
+
+    // Fetch existing appointments
+    const existingAppts = await prisma.appointment.findMany({
+      where: {
+        staffId: sId,
+        appointmentDate,
+        status: { in: ['PENDING', 'CONFIRMED', 'RESCHEDULED'] }
+      },
+      select: { startTime: true, endTime: true }
+    });
+
+    const startMins = avail.startTime.getUTCHours() * 60 + avail.startTime.getUTCMinutes();
+    const endMins = avail.endTime.getUTCHours() * 60 + avail.endTime.getUTCMinutes();
+
+    // Generate slots
+    for (let m = startMins; m <= endMins - duration; m += duration) {
+      const slotStart = m;
+      const slotEnd = m + duration;
+
+      // Check break overlap
+      const overlapsBreak = avail.breaks.some(b => {
+        const bStart = b.startTime.getUTCHours() * 60 + b.startTime.getUTCMinutes();
+        const bEnd = b.endTime.getUTCHours() * 60 + b.endTime.getUTCMinutes();
+        return slotStart < bEnd && bStart < slotEnd;
+      });
+      if (overlapsBreak) continue;
+
+      // Check appointment overlap
+      const overlapsAppt = existingAppts.some(a => {
+        const aStart = a.startTime.getUTCHours() * 60 + a.startTime.getUTCMinutes();
+        const aEnd = a.endTime.getUTCHours() * 60 + a.endTime.getUTCMinutes();
+        return slotStart < aEnd && aStart < slotEnd;
+      });
+      if (overlapsAppt) continue;
+
+      // Valid slot
+      const formatTime = (mins: number) => {
+        const h = Math.floor(mins / 60).toString().padStart(2, '0');
+        const mStr = (mins % 60).toString().padStart(2, '0');
+        return `${h}:${mStr}`;
+      };
+      
+      validSlots.add(formatTime(slotStart));
+    }
+  }
+
+  return Array.from(validSlots).sort();
 }

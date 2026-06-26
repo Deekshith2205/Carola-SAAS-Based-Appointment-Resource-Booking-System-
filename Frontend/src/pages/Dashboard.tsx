@@ -9,13 +9,7 @@ import { useAuth } from '../context/AuthContext';
 import { appointmentStatusConfig, formatDate, formatTime, formatCurrency } from '../utils';
 import { SkeletonCard, SkeletonTable, SkeletonStatCards, ApiErrorBanner, EmptyState } from '../components/common';
 import { useMyBusiness } from '../hooks/queries/useBusiness';
-import {
-  useDashboardSummary,
-  useRevenueTrends,
-  usePopularServices,
-  useStatusDistribution,
-} from '../hooks/queries/useDashboard';
-import { useAppointments } from '../hooks/queries/useAppointments';
+import { useUnifiedDashboard } from '../hooks/queries/useDashboard';
 import type { AppointmentStatus } from '../types';
 
 // ─── Colour palette mapped to status ─────────────────────────────────────────
@@ -115,20 +109,14 @@ export default function Dashboard() {
   const { data: bizResult } = useMyBusiness();
   const businessId = bizResult?.id ?? localStorage.getItem('businessId') ?? '';
 
-  // API Hooks
-  const { data: summary, isLoading: isLoadingSummary, isError: isErrorSum, error: errSum, refetch: refSum } = useDashboardSummary({ businessId });
-  const { data: trends, isLoading: isLoadingTrends, isError: isErrorTr, error: errTr, refetch: refTr } = useRevenueTrends({ businessId, period: 'monthly' });
-  const { data: popular, isLoading: isLoadingPop, isError: isErrorPop, error: errPop, refetch: refPop } = usePopularServices({ businessId, limit: 6 });
-  const { data: statusDist, isLoading: isLoadingStatus, isError: isErrorStat, error: errStat, refetch: refStat } = useStatusDistribution({ businessId });
-  const { data: apptData, isLoading: isLoadingAppt, isError: isErrorAppt, error: errAppt, refetch: refAppt } = useAppointments({ businessId, limit: 5 });
-
-  const hasError = isErrorSum || isErrorTr || isErrorPop || isErrorStat || isErrorAppt;
+  // API Hook
+  const { data: dashboardData, isLoading, isError, error, refetch } = useUnifiedDashboard({ businessId });
 
   const handleRetry = () => {
-    refSum(); refTr(); refPop(); refStat(); refAppt();
+    refetch();
   };
 
-  const appointments = apptData?.appointments ?? [];
+  const appointments = dashboardData?.recentAppointments ?? [];
 
   return (
     <div className="space-y-8">
@@ -145,37 +133,37 @@ export default function Dashboard() {
         </span>
       </div>
 
-      {hasError && <ApiErrorBanner error={errSum || errTr || errPop || errStat || errAppt} retry={handleRetry} />}
+      {isError && <ApiErrorBanner error={error} retry={handleRetry} />}
 
       {/* ── KPI Cards ── */}
-      {isLoadingSummary ? (
+      {isLoading ? (
         <SkeletonStatCards count={4} />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <KpiCard
             title="Total Appointments"
-            value={summary?.totalAppointments ?? 0}
+            value={dashboardData?.totalAppointments ?? 0}
             subtitle="All time"
             gradient="bg-gradient-to-br from-violet-500 to-indigo-600"
             icon={<svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>}
           />
           <KpiCard
             title="Confirmed Appointments"
-            value={summary?.confirmedAppointments ?? 0}
+            value={dashboardData?.confirmedAppointments ?? 0}
             subtitle="Awaiting completion"
             gradient="bg-gradient-to-br from-sky-500 to-cyan-600"
             icon={<svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
           />
           <KpiCard
             title="Active Staff"
-            value={summary?.activeStaff ?? 0}
+            value={dashboardData?.activeStaff ?? 0}
             subtitle="Currently on roster"
             gradient="bg-gradient-to-br from-emerald-500 to-teal-600"
             icon={<svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>}
           />
           <KpiCard
             title="Total Revenue"
-            value={formatCurrency(summary?.totalRevenue ?? 0)}
+            value={formatCurrency(dashboardData?.totalRevenue ?? 0)}
             subtitle="All time revenue"
             gradient="bg-gradient-to-br from-amber-500 to-orange-600"
             icon={<svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
@@ -191,9 +179,9 @@ export default function Dashboard() {
             <CardDescription>Monthly appointments over the past year</CardDescription>
           </CardHeader>
           <CardContent>
-            {isLoadingTrends ? <SkeletonCard rows={5} /> : (
+            {isLoading ? <SkeletonCard rows={5} /> : (
               <ResponsiveContainer width="100%" height={260}>
-                <AreaChart data={trends ?? []} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                <AreaChart data={dashboardData?.bookingTrends ?? []} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
                   <defs>
                     <linearGradient id="bookingGradient" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%"  stopColor={CHART_PRIMARY}   stopOpacity={0.25} />
@@ -217,18 +205,18 @@ export default function Dashboard() {
             <CardDescription>Appointment outcomes breakdown</CardDescription>
           </CardHeader>
           <CardContent>
-            {isLoadingStatus ? <SkeletonCard rows={5} /> : (
+            {isLoading ? <SkeletonCard rows={5} /> : (
               <ResponsiveContainer width="100%" height={260}>
                 <PieChart>
                   <Pie
-                    data={statusDist ?? []}
+                    data={dashboardData?.statusDistribution ?? []}
                     dataKey="count"
                     nameKey="status"
                     cx="50%" cy="45%"
                     outerRadius={85} innerRadius={42}
                     labelLine={false} label={PieLabel}
                   >
-                    {(statusDist ?? []).map((entry, i) => (
+                    {(dashboardData?.statusDistribution ?? []).map((entry, i) => (
                       <Cell key={i} fill={STATUS_COLOURS[entry.status] ?? '#94a3b8'} />
                     ))}
                   </Pie>
@@ -248,9 +236,9 @@ export default function Dashboard() {
           <CardDescription>Top services by booking count and revenue generated</CardDescription>
         </CardHeader>
         <CardContent>
-          {isLoadingPop ? <SkeletonCard rows={5} /> : (
+          {isLoading ? <SkeletonCard rows={5} /> : (
             <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={popular ?? []} margin={{ top: 4, right: 4, left: -20, bottom: 0 }} barGap={4}>
+              <BarChart data={dashboardData?.popularServices ?? []} margin={{ top: 4, right: 4, left: -20, bottom: 0 }} barGap={4}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
                 <XAxis dataKey="serviceName" tick={{ fontSize: 12, fill: 'var(--color-muted-foreground)' }} axisLine={false} tickLine={false} />
                 <YAxis yAxisId="left" tick={{ fontSize: 12, fill: 'var(--color-muted-foreground)' }} axisLine={false} tickLine={false} />
@@ -274,7 +262,7 @@ export default function Dashboard() {
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          {isLoadingAppt ? <div className="p-6"><SkeletonTable cols={6} rows={5} /></div> : (
+          {isLoading ? <div className="p-6"><SkeletonTable cols={6} rows={5} /></div> : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -298,7 +286,7 @@ export default function Dashboard() {
                       </td>
                     </tr>
                   ) : appointments.map((appt) => {
-                    const cfg = appointmentStatusConfig[appt.status] ?? { label: appt.status, color: '' };
+                    const cfg = appointmentStatusConfig[appt.status as AppointmentStatus] ?? { label: appt.status, color: '' };
                     return (
                       <tr key={appt.id} className="group transition-colors hover:bg-muted/20">
                         <td className="whitespace-nowrap px-6 py-4 font-medium">{appt.service?.serviceName ?? 'N/A'}</td>

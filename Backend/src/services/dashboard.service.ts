@@ -1,4 +1,4 @@
-import { UserRole } from '@prisma/client';
+import { UserRole, AvailabilityStatus } from '@prisma/client';
 import { prisma } from '../prisma/client';
 import * as businessAccess from './businessAccess.service';
 
@@ -6,201 +6,134 @@ import * as businessAccess from './businessAccess.service';
 function getPeriods() {
   const now = new Date();
   
-  const todayStart = new Date(now.toISOString().slice(0, 10));
-  const todayEnd = new Date(todayStart);
-  todayEnd.setUTCDate(todayEnd.getUTCDate() + 1);
-
-  const weekStart = new Date(todayStart);
-  const day = weekStart.getUTCDay();
-  const diff = weekStart.getUTCDate() - day + (day === 0 ? -6 : 1); // Monday as start of week
-  weekStart.setUTCDate(diff);
-  const weekEnd = new Date(weekStart);
-  weekEnd.setUTCDate(weekEnd.getUTCDate() + 7);
-
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+  
+  // Last 12 months for trends
+  const twelveMonthsAgo = new Date(Date.UTC(now.getUTCFullYear() - 1, now.getUTCMonth() + 1, 1));
 
-  return { todayStart, todayEnd, weekStart, weekEnd, monthStart, monthEnd };
+  return { monthStart, monthEnd, twelveMonthsAgo };
 }
 
-// 1. Booking Summary
-export async function getBookingSummary(businessId: string, userId: string, role: UserRole) {
-  await businessAccess.assertCanManageBusiness(businessId, userId, role);
-
-  const { todayStart, todayEnd, weekStart, weekEnd, monthStart, monthEnd } = getPeriods();
-
-  const getStats = async (start: Date, end: Date) => {
-    const result: any[] = await prisma.$queryRaw`
-      SELECT 
-        COUNT(a.id)::int as "totalBookings",
-        COALESCE(SUM(s.price), 0) as "totalRevenue"
-      FROM appointments a
-      JOIN services s ON a.service_id = s.id
-      WHERE a.business_id = ${businessId}::uuid
-        AND a.appointment_date >= ${start}
-        AND a.appointment_date < ${end}
-        AND a.status NOT IN ('CANCELLED', 'NO_SHOW')
-    `;
-
-    const cancelled: any[] = await prisma.$queryRaw`
-      SELECT COUNT(id)::int as "cancelledBookings"
-      FROM appointments
-      WHERE business_id = ${businessId}::uuid
-        AND appointment_date >= ${start}
-        AND appointment_date < ${end}
-        AND status = 'CANCELLED'
-    `;
-
-    return {
-      totalBookings: result[0]?.totalBookings || 0,
-      totalRevenue: parseFloat(result[0]?.totalRevenue || '0'),
-      cancelledBookings: cancelled[0]?.cancelledBookings || 0,
-    };
-  };
-
-  const [today, week, month] = await Promise.all([
-    getStats(todayStart, todayEnd),
-    getStats(weekStart, weekEnd),
-    getStats(monthStart, monthEnd),
-  ]);
-
-  return { today, week, month };
-}
-
-// 2. Revenue Trends
-export async function getRevenueTrends(
+export async function getUnifiedDashboard(
   businessId: string,
   userId: string,
-  role: UserRole,
-  startDate?: string,
-  endDate?: string,
-  groupBy: 'day' | 'week' | 'month' = 'day'
+  role: UserRole
 ) {
   await businessAccess.assertCanManageBusiness(businessId, userId, role);
 
-  const start = startDate ? new Date(startDate) : getPeriods().monthStart;
-  const end = endDate ? new Date(endDate) : new Date();
+  const { twelveMonthsAgo } = getPeriods();
 
-  const dateFormat = groupBy === 'month' ? 'YYYY-MM' : groupBy === 'week' ? 'IYYY-IW' : 'YYYY-MM-DD';
+  // 1. Fetch total appointments, status distribution, and total revenue
+  // We fetch all appointments, no exclusions, to match the single source of truth rule.
+  const [statusCounts, revenueRaw] = await Promise.all([
+    prisma.appointment.groupBy({
+      by: ['status'],
+      where: { businessId },
+      _count: { id: true },
+    }),
+    prisma.$queryRaw<{ total: string }[]>`
+      SELECT COALESCE(SUM(s.price), 0) as total
+      FROM appointments a
+      JOIN services s ON a.service_id = s.id
+      WHERE a.business_id = ${businessId}::uuid
+        AND a.status = 'COMPLETED'
+    `
+  ]);
 
-  const trends: any[] = await prisma.$queryRaw`
+  let totalAppointments = 0;
+  const statusDistributionMap: Record<string, number> = {
+    PENDING: 0,
+    CONFIRMED: 0,
+    COMPLETED: 0,
+    CANCELLED: 0,
+    NO_SHOW: 0,
+    RESCHEDULED: 0,
+  };
+
+  for (const row of statusCounts) {
+    statusDistributionMap[row.status] = row._count.id;
+    totalAppointments += row._count.id;
+  }
+
+  const statusDistribution = Object.keys(statusDistributionMap).map(status => ({
+    status,
+    count: statusDistributionMap[status]
+  }));
+
+  const totalRevenue = parseFloat(revenueRaw[0]?.total || '0');
+
+  // 2. Fetch Active Staff
+  const activeStaff = await prisma.staff.count({
+    where: { businessId, availabilityStatus: AvailabilityStatus.AVAILABLE }
+  });
+
+  // 3. Fetch Recent Appointments
+  const recentAppointments = await prisma.appointment.findMany({
+    where: { businessId },
+    include: {
+      customer: { select: { name: true, email: true } },
+      staff: { include: { user: { select: { name: true } } } },
+      service: { select: { serviceName: true, price: true } }
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 5
+  });
+
+  // 4. Booking Trends (last 12 months)
+  const trendsRaw: any[] = await prisma.$queryRaw`
     SELECT 
-      to_char(a.appointment_date, ${dateFormat}) as period,
+      to_char(a.appointment_date, 'YYYY-MM') as period,
       COUNT(a.id)::int as "bookings",
-      COALESCE(SUM(s.price), 0) as "revenue"
+      COALESCE(SUM(CASE WHEN a.status = 'COMPLETED' THEN s.price ELSE 0 END), 0) as "revenue"
     FROM appointments a
     JOIN services s ON a.service_id = s.id
     WHERE a.business_id = ${businessId}::uuid
-      AND a.appointment_date >= ${start}
-      AND a.appointment_date <= ${end}
-      AND a.status NOT IN ('CANCELLED', 'NO_SHOW')
+      AND a.appointment_date >= ${twelveMonthsAgo}
     GROUP BY period
     ORDER BY period ASC
   `;
 
-  return trends.map((t) => ({
+  const bookingTrends = trendsRaw.map((t) => ({
     period: t.period,
-    bookings: t.bookings,
+    appointments: t.bookings,
     revenue: parseFloat(t.revenue),
   }));
-}
 
-// 3. Staff Utilization
-export async function getStaffUtilization(
-  businessId: string,
-  userId: string,
-  role: UserRole,
-  startDate?: string,
-  endDate?: string
-) {
-  await businessAccess.assertCanManageBusiness(businessId, userId, role);
-
-  const start = startDate ? new Date(startDate) : getPeriods().monthStart;
-  const end = endDate ? new Date(endDate) : new Date();
-
-  const utilization: any[] = await prisma.$queryRaw`
-    SELECT 
-      u.name as "staffName",
-      COUNT(a.id)::int as "totalAppointments",
-      COALESCE(SUM(s.duration_minutes), 0)::int as "totalMinutes"
-    FROM appointments a
-    JOIN staff st ON a.staff_id = st.id
-    JOIN users u ON st.user_id = u.id
-    JOIN services s ON a.service_id = s.id
-    WHERE a.business_id = ${businessId}::uuid
-      AND a.appointment_date >= ${start}
-      AND a.appointment_date <= ${end}
-      AND a.status NOT IN ('CANCELLED', 'NO_SHOW')
-    GROUP BY u.name
-    ORDER BY "totalAppointments" DESC
-  `;
-
-  return utilization.map(u => ({
-    staffName: u.staffName,
-    totalAppointments: u.totalAppointments,
-    totalHours: u.totalMinutes / 60,
-  }));
-}
-
-// 4. Popular Services
-export async function getPopularServices(
-  businessId: string,
-  userId: string,
-  role: UserRole,
-  limit: number = 5
-) {
-  await businessAccess.assertCanManageBusiness(businessId, userId, role);
-
-  const popular: any[] = await prisma.$queryRaw`
+  // 5. Popular Services (Top 5)
+  // All bookings count towards popularity, but revenue only from COMPLETED
+  const popularRaw: any[] = await prisma.$queryRaw`
     SELECT 
       s.service_name as "serviceName",
-      COUNT(a.id)::int as "bookingsCount",
-      COALESCE(SUM(s.price), 0) as "totalRevenue"
+      COUNT(a.id)::int as "bookingCount",
+      COALESCE(SUM(CASE WHEN a.status = 'COMPLETED' THEN s.price ELSE 0 END), 0) as "revenue"
     FROM appointments a
     JOIN services s ON a.service_id = s.id
     WHERE a.business_id = ${businessId}::uuid
-      AND a.status NOT IN ('CANCELLED', 'NO_SHOW')
     GROUP BY s.service_name
-    ORDER BY "bookingsCount" DESC
-    LIMIT ${limit}::int
+    ORDER BY "bookingCount" DESC
+    LIMIT 5
   `;
 
-  return popular.map((p) => ({
+  const popularServices = popularRaw.map((p) => ({
     serviceName: p.serviceName,
-    bookingsCount: p.bookingsCount,
-    totalRevenue: parseFloat(p.totalRevenue),
+    bookingCount: p.bookingCount,
+    revenue: parseFloat(p.revenue),
   }));
-}
 
-// 5. Status Distribution
-export async function getAppointmentStatusDistribution(
-  businessId: string,
-  userId: string,
-  role: UserRole,
-  startDate?: string,
-  endDate?: string
-) {
-  await businessAccess.assertCanManageBusiness(businessId, userId, role);
-
-  const start = startDate ? new Date(startDate) : getPeriods().monthStart;
-  const end = endDate ? new Date(endDate) : new Date();
-
-  const distribution = await prisma.appointment.groupBy({
-    by: ['status'],
-    where: {
-      businessId,
-      appointmentDate: {
-        gte: start,
-        lte: end,
-      },
-    },
-    _count: {
-      id: true,
-    },
-  });
-
-  return distribution.map(d => ({
-    status: d.status,
-    count: d._count.id,
-  }));
+  return {
+    totalAppointments,
+    pendingAppointments: statusDistributionMap['PENDING'],
+    confirmedAppointments: statusDistributionMap['CONFIRMED'],
+    completedAppointments: statusDistributionMap['COMPLETED'],
+    cancelledAppointments: statusDistributionMap['CANCELLED'],
+    noShowAppointments: statusDistributionMap['NO_SHOW'],
+    rescheduledAppointments: statusDistributionMap['RESCHEDULED'],
+    totalRevenue,
+    activeStaff,
+    recentAppointments,
+    bookingTrends,
+    statusDistribution,
+    popularServices
+  };
 }

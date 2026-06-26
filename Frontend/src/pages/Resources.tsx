@@ -1,15 +1,16 @@
 import { useState, useMemo } from 'react';
 import {
   Search, Plus, Pencil, X, ChevronUp, ChevronDown,
-  ChevronsUpDown, MoreHorizontal, Trash2, Monitor,
-  Armchair, Dumbbell, Wrench, LayoutGrid, Table,
-  AlertTriangle, CheckCircle2, XCircle, Clock
+  ChevronsUpDown, Trash2, Monitor, Armchair, Dumbbell,
+  Wrench, LayoutGrid, Table, AlertTriangle, CheckCircle2,
+  XCircle, Clock
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '../components/ui/card';
 import { Button } from '../components/ui/button';
-import { cn } from '../lib/utils';
 import { SkeletonCard, SkeletonTable, ApiErrorBanner } from '../components/common';
-import { useResources, useCreateResource, useUpdateResource, useDeleteResource } from '../hooks/queries';
+import { ActionMenu, ActionMenuItem, ActionMenuSeparator } from '../components/ui/action-menu';
+import { cn } from '../lib/utils';
+import { useResources, useCreateResource, useUpdateResource, useDeleteResource } from '../hooks/queries/useResources';
 import { useMyBusiness } from '../hooks/queries/useBusiness';
 import type { Resource, ResourceType, ResourceStatus } from '../types';
 
@@ -102,23 +103,12 @@ function SortIcon({ col, sortKey, sortDir }: { col: SortKey; sortKey: SortKey; s
 
 // ─── Row Action Menu ──────────────────────────────────────────────────────────
 function RowActions({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }) {
-  const [open, setOpen] = useState(false);
   return (
-    <div className="relative">
-      <button onClick={() => setOpen(o => !o)} className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
-        <MoreHorizontal className="h-4 w-4" />
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-40 mt-1 w-44 rounded-lg border bg-card shadow-lg py-1">
-            <button onClick={() => { onEdit(); setOpen(false); }} className="flex w-full items-center gap-2.5 px-3 py-1.5 text-sm hover:bg-accent transition-colors"><Pencil className="h-3.5 w-3.5" /> Edit Resource</button>
-            <div className="my-1 border-t" />
-            <button onClick={() => { onDelete(); setOpen(false); }} className="flex w-full items-center gap-2.5 px-3 py-1.5 text-sm text-destructive hover:bg-accent hover:text-destructive transition-colors"><Trash2 className="h-3.5 w-3.5" /> Delete Resource</button>
-          </div>
-        </>
-      )}
-    </div>
+    <ActionMenu>
+      <ActionMenuItem icon={<Pencil className="h-3.5 w-3.5" />} label="Edit Resource" onClick={onEdit} />
+      <ActionMenuSeparator />
+      <ActionMenuItem icon={<Trash2 className="h-3.5 w-3.5" />} label="Delete Resource" onClick={onDelete} danger />
+    </ActionMenu>
   );
 }
 

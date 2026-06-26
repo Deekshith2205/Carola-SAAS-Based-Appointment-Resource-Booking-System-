@@ -142,7 +142,8 @@ export const prisma = basePrisma.$extends({
         if (!ctx || !ctx.userId || !ctx.role) {
           // If no authenticated context exists, delegate directly to basePrisma
           // to allow mock overrides and bypass database calls during testing or seeding.
-          const baseModel = (basePrisma as any)[model.toLowerCase()];
+          const modelProp = model.charAt(0).toLowerCase() + model.slice(1);
+          const baseModel = (basePrisma as any)[modelProp];
           if (baseModel && typeof baseModel[operation] === 'function') {
             return baseModel[operation](args);
           }
@@ -157,17 +158,18 @@ export const prisma = basePrisma.$extends({
             ...args,
             where: injectTenantFilter(model, args.where || {}, ctx as any),
           };
-          return (basePrisma as any)[model.toLowerCase()].findFirst(findFirstArgs);
+          const modelProp = model.charAt(0).toLowerCase() + model.slice(1);
+          return (basePrisma as any)[modelProp].findFirst(findFirstArgs);
         }
 
-        // 2. Intercept update/delete to verify access first
         if (operation === 'update' || operation === 'delete') {
           const filter = injectTenantFilter(model, args.where || {}, ctx as any);
-          const accessible = await (basePrisma as any)[model.toLowerCase()].findFirst({ where: filter });
+          const modelProp = model.charAt(0).toLowerCase() + model.slice(1);
+          const accessible = await (basePrisma as any)[modelProp].findFirst({ where: filter });
           if (!accessible) {
             throw new AppError(`${model} not found or access denied`, 403);
           }
-          return (basePrisma as any)[model.toLowerCase()][operation](args);
+          return (basePrisma as any)[modelProp][operation](args);
         }
 
         // 3. Intercept create to verify tenant boundaries
@@ -234,7 +236,8 @@ export const prisma = basePrisma.$extends({
               }
             }
           }
-          return (basePrisma as any)[model.toLowerCase()][operation](args);
+          const modelProp = model.charAt(0).toLowerCase() + model.slice(1);
+          return (basePrisma as any)[modelProp][operation](args);
         }
 
         // 4. For other read/write operations (findFirst, findMany, count, updateMany, deleteMany),
@@ -243,7 +246,8 @@ export const prisma = basePrisma.$extends({
           (args as any).where = injectTenantFilter(model, (args as any).where || {}, ctx as any);
         }
 
-        return (basePrisma as any)[model.toLowerCase()][operation](args);
+        const modelProp = model.charAt(0).toLowerCase() + model.slice(1);
+        return (basePrisma as any)[modelProp][operation](args);
       },
     },
   },

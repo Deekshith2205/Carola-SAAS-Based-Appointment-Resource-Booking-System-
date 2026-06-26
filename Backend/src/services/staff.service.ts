@@ -9,10 +9,18 @@ import type { CreateStaffInput, UpdateStaffInput } from '../validations/staff.va
 
 const staffInclude = {
   user: {
-    select: { id: true, name: true, email: true, role: true },
+    select: { id: true, name: true, email: true, role: true, phone: true },
   },
   business: {
     select: { id: true, businessName: true },
+  },
+  services: {
+    select: { id: true, serviceName: true },
+  },
+  availability: {
+    include: {
+      breaks: true,
+    },
   },
 } as const;
 
@@ -33,17 +41,74 @@ export async function createStaff(userId: string, role: UserRole, input: CreateS
         name: input.name,
         password: hashedPassword,
         role: 'STAFF',
+        phone: input.phone,
       },
     });
+  } else {
+    if (input.phone) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { phone: input.phone },
+      });
+    }
   }
 
-  return prisma.staff.create({
+  // Handle nested serviceIds
+  const servicesConnect = input.serviceIds ? input.serviceIds.map(id => ({ id })) : [];
+
+  const staff = await prisma.staff.create({
     data: {
       businessId: input.businessId,
       userId: user.id,
       designation: input.designation,
+      department: input.department,
+      yearsOfExperience: input.yearsOfExperience,
+      bio: input.bio,
+      certifications: input.certifications || [],
+      specializations: input.specializations || [],
       availabilityStatus: input.availabilityStatus,
+      services: {
+        connect: servicesConnect,
+      },
     },
+    include: staffInclude,
+  });
+
+  // Handle working hours
+  if (input.workingHours && input.workingHours.length > 0) {
+    for (const wh of input.workingHours) {
+      // time strings come as HH:mm, need to convert to valid DateTime for Prisma Postgres Time(0)
+      const baseDate = new Date().toISOString().split('T')[0];
+      const startTime = new Date(`${baseDate}T${wh.startTime}:00Z`);
+      const endTime = new Date(`${baseDate}T${wh.endTime}:00Z`);
+
+      const createdAvailability = await prisma.staffAvailability.create({
+        data: {
+          staffId: staff.id,
+          dayOfWeek: wh.dayOfWeek,
+          startTime: startTime,
+          endTime: endTime,
+          isActive: wh.isActive,
+        }
+      });
+
+      if (wh.breaks && wh.breaks.length > 0) {
+        for (const b of wh.breaks) {
+          await prisma.staffBreak.create({
+            data: {
+              availabilityId: createdAvailability.id,
+              name: b.name,
+              startTime: new Date(`${baseDate}T${b.startTime}:00Z`),
+              endTime: new Date(`${baseDate}T${b.endTime}:00Z`),
+            }
+          });
+        }
+      }
+    }
+  }
+
+  return prisma.staff.findUnique({
+    where: { id: staff.id },
     include: staffInclude,
   });
 }
@@ -73,6 +138,7 @@ export async function updateStaff(
 ) {
   const staff = await prisma.staff.findUnique({
     where: { id: staffId },
+    include: { user: true },
   });
 
   if (!staff) {
@@ -81,9 +147,76 @@ export async function updateStaff(
 
   await assertCanManageBusiness(staff.businessId, userId, role);
 
-  return prisma.staff.update({
+  if (input.phone || input.name) {
+    await prisma.user.update({
+      where: { id: staff.userId },
+      data: {
+        ...(input.phone && { phone: input.phone }),
+        ...(input.name && { name: input.name }),
+      },
+    });
+  }
+
+  const updateData: any = {
+    designation: input.designation,
+    department: input.department,
+    yearsOfExperience: input.yearsOfExperience,
+    bio: input.bio,
+    certifications: input.certifications,
+    specializations: input.specializations,
+    availabilityStatus: input.availabilityStatus,
+  };
+
+  if (input.serviceIds) {
+    updateData.services = {
+      set: input.serviceIds.map(id => ({ id }))
+    };
+  }
+
+  await prisma.staff.update({
     where: { id: staffId },
-    data: input,
+    data: updateData,
+    include: staffInclude,
+  });
+
+  if (input.workingHours) {
+    // Delete existing availability and breaks
+    await prisma.staffAvailability.deleteMany({
+      where: { staffId: staffId },
+    });
+
+    for (const wh of input.workingHours) {
+      const baseDate = new Date().toISOString().split('T')[0];
+      const startTime = new Date(`${baseDate}T${wh.startTime}:00Z`);
+      const endTime = new Date(`${baseDate}T${wh.endTime}:00Z`);
+
+      const createdAvailability = await prisma.staffAvailability.create({
+        data: {
+          staffId: staffId,
+          dayOfWeek: wh.dayOfWeek,
+          startTime: startTime,
+          endTime: endTime,
+          isActive: wh.isActive,
+        }
+      });
+
+      if (wh.breaks && wh.breaks.length > 0) {
+        for (const b of wh.breaks) {
+          await prisma.staffBreak.create({
+            data: {
+              availabilityId: createdAvailability.id,
+              name: b.name,
+              startTime: new Date(`${baseDate}T${b.startTime}:00Z`),
+              endTime: new Date(`${baseDate}T${b.endTime}:00Z`),
+            }
+          });
+        }
+      }
+    }
+  }
+
+  return prisma.staff.findUnique({
+    where: { id: staffId },
     include: staffInclude,
   });
 }

@@ -1,6 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../services/api';
-import type { Appointment, ApiSuccessResponse } from '../../types';
+import type { Appointment, AppointmentStatus, ApiSuccessResponse } from '../../types';
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 interface AppointmentListParams {
   page?: number;
@@ -11,6 +15,20 @@ interface AppointmentListParams {
   customerId?: string;
   appointmentDate?: string;
 }
+
+interface UpdateAppointmentPayload {
+  staffId?: string | null;
+  resourceId?: string | null;
+  /** YYYY-MM-DD or ISO string — backend normalises to YYYY-MM-DD */
+  appointmentDate?: string;
+  startTime?: string;
+  endTime?: string;
+  status?: AppointmentStatus;
+}
+
+// ---------------------------------------------------------------------------
+// Queries
+// ---------------------------------------------------------------------------
 
 export function useAppointments(params?: AppointmentListParams) {
   return useQuery({
@@ -36,6 +54,10 @@ export function useAppointmentById(id: string) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Mutations
+// ---------------------------------------------------------------------------
+
 export function useCreateAppointment() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -53,19 +75,56 @@ export function useCreateAppointment() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['appointments'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     },
   });
 }
 
+/**
+ * General appointment update (schedule, staff, resource, or status together).
+ * Uses PATCH /appointments/:id with the full update schema.
+ */
 export function useUpdateAppointment() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, ...data }: Partial<Appointment> & { id: string }) => {
-      const res = await api.patch<ApiSuccessResponse<{ appointment: Appointment }>>(`/appointments/${id}`, data);
+    mutationFn: async ({ id, ...data }: UpdateAppointmentPayload & { id: string }) => {
+      const res = await api.patch<ApiSuccessResponse<{ appointment: Appointment }>>(
+        `/appointments/${id}`,
+        data
+      );
       return res.data.data.appointment;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['appointments'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
+/**
+ * Status-only appointment update.
+ * Uses the dedicated PATCH /appointments/:id/status endpoint which:
+ *  - Only validates { status }
+ *  - Enforces business-rule transition validation on the backend
+ *  - Is never blocked by date/time validation issues
+ */
+export function useUpdateAppointmentStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: AppointmentStatus }) => {
+      const res = await api.patch<ApiSuccessResponse<{ appointment: Appointment }>>(
+        `/appointments/${id}/status`,
+        { status }
+      );
+      return res.data.data.appointment;
+    },
+    onSuccess: () => {
+      // Broad invalidation: catches all query key variants (with params, without, etc.)
+      queryClient.invalidateQueries({ queryKey: ['appointments'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+    onError: () => {
+      // Let the caller handle error display via the returned error object
     },
   });
 }
@@ -79,6 +138,7 @@ export function useCancelAppointment() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['appointments'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     },
   });
 }

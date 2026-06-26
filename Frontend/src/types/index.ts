@@ -10,7 +10,7 @@ export type ResourceType = 'ROOM' | 'EQUIPMENT' | 'VEHICLE' | 'OTHER';
 
 export type ResourceStatus = 'AVAILABLE' | 'IN_USE' | 'MAINTENANCE' | 'UNAVAILABLE';
 
-export type AvailabilityStatus = 'AVAILABLE' | 'UNAVAILABLE' | 'BUSY' | 'ON_LEAVE';
+export type AvailabilityStatus = 'AVAILABLE' | 'UNAVAILABLE' | 'BUSY' | 'ON_LEAVE' | 'OFF_DUTY';
 
 // ---------------------------------------------------------------------------
 // Auth
@@ -20,6 +20,7 @@ export interface User {
   name: string;
   email: string;
   role: UserRole;
+  phone?: string;
   createdAt?: string;
 }
 
@@ -65,9 +66,36 @@ export interface Staff {
   businessId: string;
   userId: string;
   designation?: string;
+  department?: string;
+  yearsOfExperience?: number;
+  bio?: string;
+  certifications?: string[];
+  specializations?: string[];
   availabilityStatus: AvailabilityStatus;
   createdAt: string;
-  user?: Pick<User, 'id' | 'name' | 'email' | 'role'>;
+  user?: Pick<User, 'id' | 'name' | 'email' | 'role' | 'phone'>;
+  services?: Pick<Service, 'id' | 'serviceName'>[];
+  availability?: StaffAvailability[];
+}
+
+export type DayOfWeek = 'MON' | 'TUE' | 'WED' | 'THU' | 'FRI' | 'SAT' | 'SUN';
+
+export interface StaffBreak {
+  id: string;
+  availabilityId: string;
+  name: string;
+  startTime: string;
+  endTime: string;
+}
+
+export interface StaffAvailability {
+  id: string;
+  staffId: string;
+  dayOfWeek: DayOfWeek;
+  startTime: string;
+  endTime: string;
+  isActive: boolean;
+  breaks?: StaffBreak[];
 }
 
 // ---------------------------------------------------------------------------
@@ -78,8 +106,9 @@ export interface Service {
   businessId: string;
   serviceName: string;
   durationMinutes: number;
-  price: string;
+  price: number;
   description?: string;
+  defaultResourceId?: string;
   createdAt: string;
 }
 

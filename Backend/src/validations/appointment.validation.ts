@@ -23,11 +23,21 @@ export const createAppointmentSchema = z
     path: ['endTime'],
   });
 
+// Accepts YYYY-MM-DD (z.string().date()) OR an ISO-8601 datetime string.
+// We normalise to YYYY-MM-DD in the service layer.
+const flexibleDateString = z
+  .string()
+  .refine(
+    (v) => /^\d{4}-\d{2}-\d{2}/.test(v),
+    { message: 'Date must start with YYYY-MM-DD' }
+  )
+  .transform((v) => v.slice(0, 10)); // always normalise to YYYY-MM-DD
+
 export const updateAppointmentSchema = z
   .object({
     staffId: z.string().uuid().nullable().optional(),
     resourceId: z.string().uuid().nullable().optional(),
-    appointmentDate: z.string().date().optional(),
+    appointmentDate: flexibleDateString.optional(),
     startTime: z.string().regex(timeRegex).optional(),
     endTime: z.string().regex(timeRegex).optional(),
     status: z.nativeEnum(AppointmentStatus).optional(),
@@ -45,5 +55,24 @@ export const updateAppointmentSchema = z
     }
   );
 
+// ── Status-only update schema ────────────────────────────────────────────────
+// Used exclusively by PATCH /appointments/:id/status so that status updates
+// are never blocked by date/time validation failures.
+export const updateAppointmentStatusSchema = z.object({
+  status: z.nativeEnum(AppointmentStatus, {
+    errorMap: () => ({ message: `Invalid status. Allowed values: ${Object.values(AppointmentStatus).join(', ')}` }),
+  }),
+});
+
 export type CreateAppointmentInput = z.infer<typeof createAppointmentSchema>;
 export type UpdateAppointmentInput = z.infer<typeof updateAppointmentSchema>;
+export type UpdateAppointmentStatusInput = z.infer<typeof updateAppointmentStatusSchema>;
+
+export const appointmentSlotQuerySchema = z.object({
+  businessId: z.string().uuid(),
+  serviceId: z.string().uuid(),
+  staffId: z.string().uuid().optional(),
+  date: z.string().date(),
+});
+
+export type AppointmentSlotQuery = z.infer<typeof appointmentSlotQuerySchema>;

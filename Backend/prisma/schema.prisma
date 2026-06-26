@@ -35,6 +35,7 @@ enum AvailabilityStatus {
   UNAVAILABLE
   BUSY
   ON_LEAVE
+  OFF_DUTY
 }
 
 enum ResourceType {
@@ -103,6 +104,7 @@ model User {
   email     String   @unique
   password  String
   role      UserRole
+  phone     String?
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -159,6 +161,11 @@ model Staff {
   businessId         String             @map("business_id") @db.Uuid
   userId             String             @map("user_id") @db.Uuid
   designation        String?
+  department         String?
+  yearsOfExperience  Int?               @map("years_of_experience")
+  bio                String?
+  certifications     String[]
+  specializations    String[]
   availabilityStatus AvailabilityStatus @default(AVAILABLE) @map("availability_status")
   createdAt          DateTime           @default(now()) @map("created_at")
 
@@ -167,6 +174,7 @@ model Staff {
   appointments Appointment[]
   availability StaffAvailability[]
   leaves       StaffLeave[]
+  services     Service[]
 
   @@unique([businessId, userId])
   @@index([businessId])
@@ -182,12 +190,16 @@ model Service {
   durationMinutes Int      @map("duration_minutes")
   price           Decimal  @db.Decimal(10, 2)
   description     String?
+  defaultResourceId String? @map("default_resource_id") @db.Uuid
   createdAt       DateTime @default(now()) @map("created_at")
 
   business     Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  defaultResource Resource?  @relation(fields: [defaultResourceId], references: [id], onDelete: SetNull)
   appointments Appointment[]
+  staff        Staff[]
 
   @@index([businessId])
+  @@index([defaultResourceId])
   @@map("services")
 }
 
@@ -201,6 +213,7 @@ model Resource {
 
   business     Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
   appointments Appointment[]
+  defaultForServices Service[]
 
   @@index([businessId])
   @@index([status])
@@ -251,11 +264,25 @@ model StaffAvailability {
   updatedAt DateTime  @updatedAt @map("updated_at")
 
   staff Staff @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  breaks StaffBreak[]
 
   @@unique([staffId, dayOfWeek])
   @@index([staffId])
   @@index([staffId, dayOfWeek, isActive])
   @@map("staff_availability")
+}
+
+model StaffBreak {
+  id              String            @id @default(uuid()) @db.Uuid
+  availabilityId  String            @map("availability_id") @db.Uuid
+  name            String
+  startTime       DateTime          @map("start_time") @db.Time(0)
+  endTime         DateTime          @map("end_time") @db.Time(0)
+
+  availability    StaffAvailability @relation(fields: [availabilityId], references: [id], onDelete: Cascade)
+
+  @@index([availabilityId])
+  @@map("staff_breaks")
 }
 
 model StaffLeave {

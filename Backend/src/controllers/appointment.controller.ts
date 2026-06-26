@@ -30,6 +30,12 @@ export const list = asyncHandler(async (req: Request, res: Response) => {
   sendPaginated(res, 'appointments', result);
 });
 
+export const getSlots = asyncHandler(async (req: Request, res: Response) => {
+  const { businessId, serviceId, date, staffId } = req.query as any;
+  const slots = await appointmentService.getAvailableTimeSlots(businessId, serviceId, date, staffId);
+  sendSuccess(res, { slots }, { message: 'Available slots fetched successfully' });
+});
+
 export const getById = asyncHandler(async (req: Request, res: Response) => {
   const appointment = await appointmentService.getAppointmentById(
     req.params.id,
@@ -52,6 +58,28 @@ export const update = asyncHandler(async (req: Request, res: Response) => {
 
   sendSuccess(res, { appointment }, { message: 'Appointment updated successfully' });
 });
+
+export const updateStatus = asyncHandler(async (req: Request, res: Response) => {
+  const appointment = await appointmentService.updateAppointmentStatus(
+    req.params.id,
+    req.user!.id,
+    req.user!.role,
+    req.body
+  );
+
+  req.auditLog = {
+    action: 'APPOINTMENT_UPDATE',
+    entity: 'Appointment',
+    entityId: appointment.id,
+    details: {
+      action: 'UPDATE_APPOINTMENT_STATUS',
+      newStatus: appointment.status,
+    },
+  };
+
+  sendSuccess(res, { appointment }, { message: `Appointment status updated to ${appointment.status}` });
+});
+
 
 export const cancel = asyncHandler(async (req: Request, res: Response) => {
   const appointment = await appointmentService.cancelAppointment(

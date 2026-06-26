@@ -4,7 +4,20 @@ import { disconnectPrisma, prisma } from './prisma/client';
 import { initJobs } from './jobs/reminder.job';
 
 async function startServer(): Promise<void> {
-  await prisma.$connect();
+  const MAX_RETRIES = 5;
+  for (let i = 0; i < MAX_RETRIES; i++) {
+    try {
+      await prisma.$connect();
+      console.log('Successfully connected to the database.');
+      break;
+    } catch (error) {
+      console.error(`Database connection failed (attempt ${i + 1}/${MAX_RETRIES}).`);
+      if (i === MAX_RETRIES - 1) {
+        throw error;
+      }
+      await new Promise(res => setTimeout(res, 2000 * (i + 1))); // Exponential backoff
+    }
+  }
   
   // Initialize background jobs (e.g., appointment reminders)
   initJobs();

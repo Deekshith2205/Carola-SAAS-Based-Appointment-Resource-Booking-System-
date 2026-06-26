@@ -82,6 +82,7 @@ export const availabilityStatusConfig: Record<AvailabilityStatus, { label: strin
   UNAVAILABLE: { label: 'Unavailable', color: 'bg-red-100 text-red-800' },
   BUSY:        { label: 'Busy',        color: 'bg-yellow-100 text-yellow-800' },
   ON_LEAVE:    { label: 'On Leave',    color: 'bg-purple-100 text-purple-800' },
+  OFF_DUTY:    { label: 'Off Duty',    color: 'bg-gray-100 text-gray-800' },
 };
 
 // ---------------------------------------------------------------------------

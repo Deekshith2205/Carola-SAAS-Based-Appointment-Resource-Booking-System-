@@ -2,8 +2,9 @@ import { useState, useMemo } from 'react';
 import {
   Search, Plus, Eye, Pencil, X, ChevronUp, ChevronDown,
   ChevronsUpDown, CalendarDays, Filter, CheckCircle2,
-  Clock, XCircle, CheckCheck, RefreshCcw, MoreHorizontal,
+  Clock, XCircle, CheckCheck, RefreshCcw
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Card, CardContent, CardHeader } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import {
@@ -11,8 +12,15 @@ import {
 } from '../components/ui/select';
 import { MultiStepBookingForm } from '../components/appointments/BookingForm';
 import { EmptyState, SkeletonTable, ApiErrorBanner } from '../components/common';
+import { ActionMenu, ActionMenuItem, ActionMenuSeparator } from '../components/ui/action-menu';
 import { cn } from '../lib/utils';
-import { useAppointments, useCreateAppointment, useUpdateAppointment, useCancelAppointment } from '../hooks/queries';
+import {
+  useAppointments,
+  useCreateAppointment,
+  useUpdateAppointment,
+  useUpdateAppointmentStatus,
+  useCancelAppointment,
+} from '../hooks/queries';
 import { useMyBusiness } from '../hooks/queries/useBusiness';
 import { formatTime, formatDate, formatCurrency } from '../utils';
 import type { Appointment, AppointmentStatus } from '../types';
@@ -45,8 +53,8 @@ function toDisplay(a: Appointment): ApptDisplay {
     startTime: a.startTime,
     endTime: a.endTime,
     status: a.status,
-    price: parseFloat(a.service?.price ?? '0'),
-    notes: '', // Backend doesn't support notes yet
+    price: typeof a.service?.price === 'number' ? a.service.price : parseFloat(a.service?.price as any ?? '0'),
+    notes: '',
   };
 }
 
@@ -114,6 +122,16 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+// ─── Inline error banner ──────────────────────────────────────────────────────
+function InlineError({ message }: { message: string }) {
+  return (
+    <div className="mx-6 mt-4 rounded-lg bg-destructive/15 text-destructive text-sm font-medium p-3 border border-destructive/20 flex items-start gap-2">
+      <span className="shrink-0 mt-0.5">⚠️</span>
+      <span>{message}</span>
+    </div>
+  );
+}
+
 // ─── View Modal ───────────────────────────────────────────────────────────────
 function ViewModal({ appt, onClose }: { appt: ApptDisplay; onClose: () => void }) {
   return (
@@ -146,69 +164,139 @@ function ViewModal({ appt, onClose }: { appt: ApptDisplay; onClose: () => void }
   );
 }
 
-// ─── Edit Modal ───────────────────────────────────────────────────────────────
-function EditModal({ appt, onClose, onSave, isSaving, error }: { appt: ApptDisplay; onClose: () => void; onSave: (updated: Partial<ApptDisplay>) => void; isSaving?: boolean; error?: string | null }) {
+// ─── Edit / Status Modal ──────────────────────────────────────────────────────
+// This modal is used for two distinct operations:
+//   1. Status-only change — handled by useUpdateAppointmentStatus (PATCH /:id/status)
+//   2. Schedule change    — handled by useUpdateAppointment       (PATCH /:id)
+// Separating these prevents date-format validation from blocking status updates.
+
+interface EditModalProps {
+  appt: ApptDisplay;
+  onClose: () => void;
+  onSaveStatus: (status: AppointmentStatus) => void;
+  onSaveSchedule: (patch: { date: string; startTime: string; endTime: string }) => void;
+  isSavingStatus: boolean;
+  isSavingSchedule: boolean;
+  error: string | null;
+}
+
+function EditModal({
+  appt, onClose, onSaveStatus, onSaveSchedule,
+  isSavingStatus, isSavingSchedule, error,
+}: EditModalProps) {
   const [status, setStatus] = useState<AppointmentStatus>(appt.status);
-  const [date, setDate] = useState(appt.date.split('T')[0]); // simplified
+  // Keep the raw YYYY-MM-DD part only, stripping any time component from ISO strings
+  const [date, setDate] = useState(appt.date.slice(0, 10));
   const [startTime, setStartTime] = useState(appt.startTime);
   const [endTime, setEndTime] = useState(appt.endTime);
-  const [notes, setNotes] = useState(appt.notes ?? '');
+
+  const statusChanged   = status !== appt.status;
+  const scheduleChanged = date !== appt.date.slice(0, 10) || startTime !== appt.startTime || endTime !== appt.endTime;
+  const isSaving = isSavingStatus || isSavingSchedule;
+
+  // Terminal statuses cannot be changed
+  const isTerminal = ['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(appt.status);
+
+  const handleSave = () => {
+    if (statusChanged) {
+      onSaveStatus(status);
+    } else if (scheduleChanged) {
+      onSaveSchedule({ date, startTime, endTime });
+    }
+  };
+
+  const hasChanges = statusChanged || scheduleChanged;
 
   return (
     <ModalOverlay onClose={onClose}>
       <div className="w-full max-w-lg">
-        <ModalHeader title="Edit Appointment" subtitle={appt.id.split('-')[0]} onClose={onClose} />
-        {error && (
-          <div className="mx-6 mt-4 rounded-lg bg-destructive/15 text-destructive text-sm font-medium p-3 border border-destructive/20 flex items-start gap-2">
-            <span className="shrink-0 mt-0.5">⚠️</span>
-            {error}
+        <ModalHeader title="Edit Appointment" subtitle={`#${appt.id.split('-')[0]}`} onClose={onClose} />
+
+        {error && <InlineError message={error} />}
+
+        {isTerminal && (
+          <div className="mx-6 mt-4 rounded-lg bg-muted/60 text-muted-foreground text-sm p-3 border border-border flex items-start gap-2">
+            <span className="shrink-0 mt-0.5">ℹ️</span>
+            <span>This appointment is in a terminal state (<strong>{STATUS_CONFIG[appt.status]?.label}</strong>) and its status cannot be changed.</span>
           </div>
         )}
+
         <div className="p-6 space-y-5">
+          {/* Appointment summary */}
           <div className="rounded-lg bg-muted/40 p-3 text-sm text-muted-foreground space-y-1">
             <p><span className="font-medium text-foreground">{appt.service}</span> · {appt.customer}</p>
             <p>{appt.business} · {appt.staff}</p>
           </div>
 
+          {/* Status selector */}
           <div>
             <label className="block text-sm font-medium mb-1.5">Status</label>
-            <Select value={status} onValueChange={(v) => setStatus(v as AppointmentStatus)}>
+            <Select value={status} onValueChange={(v) => setStatus(v as AppointmentStatus)} disabled={isTerminal}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 {(Object.keys(STATUS_CONFIG) as AppointmentStatus[]).map(s => (
-                  <SelectItem key={s} value={s}>{STATUS_CONFIG[s].label}</SelectItem>
+                  <SelectItem key={s} value={s}>
+                    <span className="inline-flex items-center gap-2">
+                      {STATUS_CONFIG[s].icon}
+                      {STATUS_CONFIG[s].label}
+                    </span>
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            {statusChanged && !isTerminal && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Changing: <strong>{STATUS_CONFIG[appt.status]?.label}</strong> → <strong>{STATUS_CONFIG[status]?.label}</strong>
+              </p>
+            )}
           </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-1.5">Date</label>
-            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring" />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
+          {/* Schedule fields — disabled when a status change is pending to avoid mixed operations */}
+          <div className={cn('space-y-4 transition-opacity', statusChanged && 'opacity-40 pointer-events-none select-none')}>
             <div>
-              <label className="block text-sm font-medium mb-1.5">Start Time</label>
-              <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring" />
+              <label className="block text-sm font-medium mb-1.5">Date</label>
+              <input
+                type="date"
+                value={date}
+                onChange={e => setDate(e.target.value)}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              />
             </div>
-            <div>
-              <label className="block text-sm font-medium mb-1.5">End Time</label>
-              <input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring" />
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-1.5">Start Time</label>
+                <input
+                  type="time"
+                  value={startTime}
+                  onChange={e => setStartTime(e.target.value)}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1.5">End Time</label>
+                <input
+                  type="time"
+                  value={endTime}
+                  onChange={e => setEndTime(e.target.value)}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-1.5">Notes</label>
-            <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} placeholder="Add notes…" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none" />
-          </div>
+          {statusChanged && scheduleChanged && (
+            <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded-md p-2 border border-amber-200 dark:border-amber-800">
+              ⚠️ Save status change first, then edit the schedule separately.
+            </p>
+          )}
         </div>
+
         <div className="border-t px-6 py-4 flex justify-end gap-3">
           <Button variant="outline" onClick={onClose} disabled={isSaving}>Cancel</Button>
-          <Button onClick={() => onSave({ status, date, startTime, endTime, notes })} disabled={isSaving}>
-            {isSaving ? 'Saving...' : 'Save Changes'}
+          <Button onClick={handleSave} disabled={!hasChanges || isSaving || isTerminal}>
+            {isSaving ? 'Saving…' : statusChanged ? 'Update Status' : 'Save Schedule'}
           </Button>
         </div>
       </div>
@@ -219,24 +307,36 @@ function EditModal({ appt, onClose, onSave, isSaving, error }: { appt: ApptDispl
 function CreateModal({ onClose, businessId }: { onClose: () => void; businessId: string }) {
   const createReq = useCreateAppointment();
   const [apiError, setApiError] = useState<string | null>(null);
-  
+
   const handleSuccess = async (data: any) => {
     setApiError(null);
     try {
+      const staffId    = data.staffId    && data.staffId    !== 'any' ? data.staffId    : undefined;
+      const resourceId = data.resourceId && data.resourceId !== 'any' ? data.resourceId : undefined;
+
+      const durationMinutes: number = data.durationMinutes ?? 30;
+      const [startH, startM] = (data.timeSlot as string).split(':').map(Number);
+      const endTotalMinutes = startH * 60 + startM + durationMinutes;
+      const endTime = `${String(Math.floor(endTotalMinutes / 60) % 24).padStart(2, '0')}:${String(endTotalMinutes % 60).padStart(2, '0')}`;
+
       await createReq.mutateAsync({
         businessId,
         serviceId: data.serviceId,
-        staffId: data.staffId,
+        staffId,
+        resourceId,
         appointmentDate: data.date,
         startTime: data.timeSlot,
-        endTime: data.timeSlot, // Placeholder since form doesn't track end time explicitly
+        endTime,
       });
+      toast.success('Appointment booked successfully!');
       onClose();
     } catch (e: any) {
       console.error(e);
-      setApiError(
-        e.response?.data?.message || e.message || 'Failed to create appointment.'
-      );
+      let errMsg = e.response?.data?.message || e.message || 'Failed to create appointment.';
+      if (e.response?.data?.errors && Array.isArray(e.response.data.errors)) {
+        errMsg = `${errMsg}: ${e.response.data.errors.join(' | ')}`;
+      }
+      setApiError(errMsg);
     }
   };
 
@@ -244,16 +344,11 @@ function CreateModal({ onClose, businessId }: { onClose: () => void; businessId:
     <ModalOverlay onClose={onClose}>
       <div className="w-full max-w-2xl bg-card rounded-xl">
         <ModalHeader title="New Appointment" subtitle="Follow the steps to book an appointment" onClose={onClose} />
-        {apiError && (
-          <div className="mx-6 mt-4 rounded-lg bg-destructive/15 text-destructive text-sm font-medium p-3 border border-destructive/20 flex items-start gap-2">
-            <span className="shrink-0 mt-0.5">⚠️</span>
-            {apiError}
-          </div>
-        )}
+        {apiError && <InlineError message={apiError} />}
         <div className="p-6 relative">
           {createReq.isPending && (
             <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/50 backdrop-blur-sm rounded-lg">
-              <span className="font-medium text-muted-foreground animate-pulse">Booking...</span>
+              <span className="font-medium text-muted-foreground animate-pulse">Booking…</span>
             </div>
           )}
           <MultiStepBookingForm onSuccess={handleSuccess} onCancel={onClose} />
@@ -270,41 +365,19 @@ function RowActions({ appt, onView, onEdit, onCancel }: {
   onEdit: () => void;
   onCancel: () => void;
 }) {
-  const [open, setOpen] = useState(false);
   const canCancel = appt.status === 'PENDING' || appt.status === 'CONFIRMED';
 
   return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-      >
-        <MoreHorizontal className="h-4 w-4" />
-      </button>
-      {open && (
+    <ActionMenu>
+      <ActionMenuItem icon={<Eye className="h-3.5 w-3.5" />} label="View Details" onClick={onView} />
+      <ActionMenuItem icon={<Pencil className="h-3.5 w-3.5" />} label="Edit" onClick={onEdit} />
+      {canCancel && (
         <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-40 mt-1 w-44 rounded-lg border bg-card shadow-lg py-1">
-            <MenuItem icon={<Eye className="h-3.5 w-3.5" />} label="View Details" onClick={() => { onView(); setOpen(false); }} />
-            <MenuItem icon={<Pencil className="h-3.5 w-3.5" />} label="Edit" onClick={() => { onEdit(); setOpen(false); }} />
-            {canCancel && (
-              <>
-                <div className="my-1 border-t" />
-                <MenuItem icon={<XCircle className="h-3.5 w-3.5" />} label="Cancel" onClick={() => { onCancel(); setOpen(false); }} danger />
-              </>
-            )}
-          </div>
+          <ActionMenuSeparator />
+          <ActionMenuItem icon={<XCircle className="h-3.5 w-3.5" />} label="Cancel" onClick={onCancel} danger />
         </>
       )}
-    </div>
-  );
-}
-
-function MenuItem({ icon, label, onClick, danger }: { icon: React.ReactNode; label: string; onClick: () => void; danger?: boolean }) {
-  return (
-    <button onClick={onClick} className={cn('flex w-full items-center gap-2.5 px-3 py-1.5 text-sm transition-colors hover:bg-accent', danger && 'text-destructive hover:text-destructive')}>
-      {icon} {label}
-    </button>
+    </ActionMenu>
   );
 }
 
@@ -325,20 +398,22 @@ export default function AppointmentsPage() {
   const rawAppointments = apptData?.appointments ?? [];
   const appointments: ApptDisplay[] = rawAppointments.map(toDisplay);
 
-  const updateReq = useUpdateAppointment();
-  const cancelReq = useCancelAppointment();
+  // Mutations
+  const updateStatusReq   = useUpdateAppointmentStatus();
+  const updateScheduleReq = useUpdateAppointment();
+  const cancelReq         = useCancelAppointment();
 
-  const [search, setSearch]         = useState('');
-  const [dateFilter, setDateFilter] = useState('');
+  const [search, setSearch]             = useState('');
+  const [dateFilter, setDateFilter]     = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | AppointmentStatus>('ALL');
-  const [sortKey, setSortKey]       = useState<SortKey>('date');
-  const [sortDir, setSortDir]       = useState<SortDir>('desc');
-  const [modal, setModal]           = useState<ModalState>({ type: 'none' });
-  const [editError, setEditError]   = useState<string | null>(null);
-  const [page, setPage]             = useState(1);
+  const [sortKey, setSortKey]           = useState<SortKey>('date');
+  const [sortDir, setSortDir]           = useState<SortDir>('desc');
+  const [modal, setModal]               = useState<ModalState>({ type: 'none' });
+  const [editError, setEditError]       = useState<string | null>(null);
+  const [page, setPage]                 = useState(1);
   const PAGE_SIZE = 8;
 
-  // ── filter + sort ──
+  // ── Filter + sort ──────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
     let rows = [...appointments];
     if (search.trim()) {
@@ -373,28 +448,51 @@ export default function AppointmentsPage() {
 
   const handleFilterChange = (fn: () => void) => { fn(); setPage(1); };
 
+  // ── Cancel handler ─────────────────────────────────────────────────────────
   const handleCancel = async (id: string) => {
-    await cancelReq.mutateAsync(id);
-  };
-
-  const handleEdit = async (id: string, patch: Partial<ApptDisplay>) => {
-    setEditError(null);
     try {
-      await updateReq.mutateAsync({
-        id,
-        status: patch.status,
-        appointmentDate: patch.date ? new Date(patch.date).toISOString() : undefined,
-        startTime: patch.startTime,
-        endTime: patch.endTime,
-      });
-      setModal({ type: 'none' });
+      await cancelReq.mutateAsync(id);
+      toast.success('Appointment cancelled.');
     } catch (e: any) {
-      console.error(e);
-      setEditError(e.response?.data?.message || e.message || 'Failed to update appointment.');
+      const msg = e.response?.data?.message || e.message || 'Failed to cancel appointment.';
+      toast.error(msg);
     }
   };
 
-  // summary counts
+  // ── Status update handler ──────────────────────────────────────────────────
+  const handleStatusUpdate = async (id: string, status: AppointmentStatus) => {
+    setEditError(null);
+    try {
+      await updateStatusReq.mutateAsync({ id, status });
+      toast.success(`Status updated to ${STATUS_CONFIG[status]?.label ?? status}.`);
+      setModal({ type: 'none' });
+    } catch (e: any) {
+      const msg = e.response?.data?.message || e.message || 'Failed to update appointment status.';
+      setEditError(msg);
+      // Don't toast here — the inline error in the modal is sufficient
+    }
+  };
+
+  // ── Schedule update handler ────────────────────────────────────────────────
+  const handleScheduleUpdate = async (id: string, patch: { date: string; startTime: string; endTime: string }) => {
+    setEditError(null);
+    try {
+      await updateScheduleReq.mutateAsync({
+        id,
+        // date is already YYYY-MM-DD from the <input type="date"> value
+        appointmentDate: patch.date,
+        startTime: patch.startTime,
+        endTime: patch.endTime,
+      });
+      toast.success('Appointment schedule updated.');
+      setModal({ type: 'none' });
+    } catch (e: any) {
+      const msg = e.response?.data?.message || e.message || 'Failed to update appointment schedule.';
+      setEditError(msg);
+    }
+  };
+
+  // ── Summary counts ─────────────────────────────────────────────────────────
   const counts = useMemo(() => {
     const c: Partial<Record<AppointmentStatus | 'ALL', number>> = { ALL: appointments.length };
     ALL_STATUSES.forEach(s => { c[s] = appointments.filter(a => a.status === s).length; });
@@ -505,9 +603,9 @@ export default function AppointmentsPage() {
                   {pageRows.length === 0 ? (
                     <tr>
                       <td colSpan={8} className="p-8">
-                        <EmptyState 
+                        <EmptyState
                           icon={<CalendarDays className="h-7 w-7" />}
-                          title="No appointments found" 
+                          title="No appointments found"
                           description="Try adjusting your search filters or create a new appointment."
                         />
                       </td>
@@ -532,7 +630,12 @@ export default function AppointmentsPage() {
                       <td className="whitespace-nowrap px-4 py-3.5 font-semibold">{formatCurrency(appt.price)}</td>
                       <td className="whitespace-nowrap px-4 py-3.5"><StatusPill status={appt.status} /></td>
                       <td className="px-4 py-3.5">
-                        <RowActions appt={appt} onView={() => setModal({ type: 'view', appt })} onEdit={() => { setEditError(null); setModal({ type: 'edit', appt }); }} onCancel={() => handleCancel(appt.id)} />
+                        <RowActions
+                          appt={appt}
+                          onView={() => setModal({ type: 'view', appt })}
+                          onEdit={() => { setEditError(null); setModal({ type: 'edit', appt }); }}
+                          onCancel={() => handleCancel(appt.id)}
+                        />
                       </td>
                     </tr>
                   ))}
@@ -558,17 +661,23 @@ export default function AppointmentsPage() {
       </Card>
 
       {/* ── Modals ── */}
-      {modal.type === 'view' && <ViewModal appt={modal.appt} onClose={() => setModal({ type: 'none' })} />}
+      {modal.type === 'view' && (
+        <ViewModal appt={modal.appt} onClose={() => setModal({ type: 'none' })} />
+      )}
       {modal.type === 'edit' && (
-        <EditModal 
-          appt={modal.appt} 
-          onClose={() => setModal({ type: 'none' })} 
-          onSave={(p) => handleEdit(modal.appt.id, p)} 
-          isSaving={updateReq.isPending}
+        <EditModal
+          appt={modal.appt}
+          onClose={() => { setEditError(null); setModal({ type: 'none' }); }}
+          onSaveStatus={(status) => handleStatusUpdate(modal.appt.id, status)}
+          onSaveSchedule={(patch) => handleScheduleUpdate(modal.appt.id, patch)}
+          isSavingStatus={updateStatusReq.isPending}
+          isSavingSchedule={updateScheduleReq.isPending}
           error={editError}
         />
       )}
-      {modal.type === 'create' && <CreateModal onClose={() => setModal({ type: 'none' })} businessId={businessId} />}
+      {modal.type === 'create' && (
+        <CreateModal onClose={() => setModal({ type: 'none' })} businessId={businessId} />
+      )}
     </div>
   );
 }

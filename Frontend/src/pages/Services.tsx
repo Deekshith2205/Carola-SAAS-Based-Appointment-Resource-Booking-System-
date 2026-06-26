@@ -1,15 +1,16 @@
 import { useState, useMemo } from 'react';
 import {
   Search, Plus, Pencil, X, ChevronUp, ChevronDown,
-  ChevronsUpDown, MoreHorizontal, Trash2, Clock, DollarSign,
+  ChevronsUpDown, Trash2, Clock, DollarSign,
   Scissors, Briefcase, Activity
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '../components/ui/card';
 import { Button } from '../components/ui/button';
+import { EmptyState, SkeletonCard, ApiErrorBanner } from '../components/common';
+import { ActionMenu, ActionMenuItem, ActionMenuSeparator } from '../components/ui/action-menu';
 import { formatCurrency } from '../utils';
 import { cn } from '../lib/utils';
-import { EmptyState, SkeletonCard, ApiErrorBanner } from '../components/common';
-import { useServices, useCreateService, useUpdateService, useDeleteService } from '../hooks/queries';
+import { useServices, useCreateService, useUpdateService, useDeleteService } from '../hooks/queries/useServices';
 import { useMyBusiness } from '../hooks/queries/useBusiness';
 import type { Service } from '../types';
 
@@ -28,7 +29,7 @@ function toDisplay(s: Service): ServiceDisplay {
     id: s.id,
     name: s.serviceName,
     duration: s.durationMinutes,
-    price: parseFloat(s.price),
+    price: typeof s.price === 'number' ? s.price : parseFloat(s.price as any),
     description: s.description ?? '',
     category: 'General',
   };
@@ -75,30 +76,12 @@ function SortIcon({ col, sortKey, sortDir }: { col: SortKey; sortKey: SortKey; s
 
 // ─── Row Action Menu ──────────────────────────────────────────────────────────
 function RowActions({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }) {
-  const [open, setOpen] = useState(false);
   return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-      >
-        <MoreHorizontal className="h-4 w-4" />
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-40 mt-1 w-44 rounded-lg border bg-card shadow-lg py-1">
-            <button onClick={() => { onEdit(); setOpen(false); }} className="flex w-full items-center gap-2.5 px-3 py-1.5 text-sm hover:bg-accent transition-colors">
-              <Pencil className="h-3.5 w-3.5" /> Edit Details
-            </button>
-            <div className="my-1 border-t" />
-            <button onClick={() => { onDelete(); setOpen(false); }} className="flex w-full items-center gap-2.5 px-3 py-1.5 text-sm text-destructive hover:bg-accent hover:text-destructive transition-colors">
-              <Trash2 className="h-3.5 w-3.5" /> Delete Service
-            </button>
-          </div>
-        </>
-      )}
-    </div>
+    <ActionMenu>
+      <ActionMenuItem icon={<Pencil className="h-3.5 w-3.5" />} label="Edit Details" onClick={onEdit} />
+      <ActionMenuSeparator />
+      <ActionMenuItem icon={<Trash2 className="h-3.5 w-3.5" />} label="Delete Service" onClick={onDelete} danger />
+    </ActionMenu>
   );
 }
 

@@ -67,6 +67,15 @@ export function errorHandler(
       });
       return;
     }
+
+    // Connection errors (Can't reach server, timeout)
+    if (err.code === 'P1001' || err.code === 'P1002' || err.code === 'P1008') {
+      res.status(503).json({
+        success: false,
+        message: 'The database is temporarily unavailable. Please try again in a few moments.',
+      });
+      return;
+    }
   }
 
   if (err instanceof Prisma.PrismaClientValidationError) {
