@@ -1,12 +1,20 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeProvider';
-import { ProtectedRoute } from './routes/ProtectedRoute';
+import { RoleProtectedRoute } from './routes/RoleProtectedRoute';
+import { getDefaultRouteForRole } from './utils/routeUtils';
 
 // Layouts
 import AuthLayout from './layouts/AuthLayout';
 import DashboardLayout from './layouts/DashboardLayout';
+import CustomerLayout from './layouts/CustomerLayout';
+
+// Portal Pages
+import CustomerDashboard   from './pages/portal/CustomerDashboard';
+import CustomerBooking     from './pages/portal/CustomerBooking';
+import CustomerAppointments from './pages/portal/CustomerAppointments';
+import CustomerProfile     from './pages/portal/CustomerProfile';
 
 // Pages
 import Login from './pages/Login';
@@ -14,8 +22,14 @@ import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
 import Dashboard from './pages/Dashboard';
 import Unauthorized from './pages/Unauthorized';
+import NotFound from './pages/NotFound';
 import AppointmentsPage from './pages/Appointments';
 import StaffPage from './pages/Staff';
+import ServicesPage from './pages/Services';
+import ResourcesPage from './pages/Resources';
+import AnalyticsPage from './pages/Analytics';
+import SettingsPage from './pages/Settings';
+import NotificationsPage from './pages/Notifications';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -25,6 +39,11 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+function RootRedirect() {
+  const { user } = useAuth();
+  return <Navigate to={getDefaultRouteForRole(user?.role)} replace />;
+}
 
 export default function App() {
   return (
@@ -41,29 +60,46 @@ export default function App() {
                 <Route path="/unauthorized" element={<Unauthorized />} />
               </Route>
 
-              {/* Protected Routes */}
+              {/* Protected Routes (Business / Admin) */}
               <Route
                 path="/"
                 element={
-                  <ProtectedRoute>
+                  <RoleProtectedRoute allowedRoles={['SUPER_ADMIN', 'BUSINESS_OWNER', 'STAFF']}>
                     <DashboardLayout />
-                  </ProtectedRoute>
+                  </RoleProtectedRoute>
                 }
               >
-                <Route index element={<Navigate to="/dashboard" replace />} />
+                <Route index element={<RootRedirect />} />
                 <Route path="dashboard" element={<Dashboard />} />
 
                 {/* Placeholder routes – add real pages as they're built */}
                 <Route path="appointments" element={<AppointmentsPage />} />
                 <Route path="staff"        element={<StaffPage />} />
-                <Route path="services"     element={<PlaceholderPage title="Services" />} />
-                <Route path="resources"    element={<PlaceholderPage title="Resources" />} />
-                <Route path="analytics"    element={<PlaceholderPage title="Analytics" />} />
-                <Route path="settings"     element={<PlaceholderPage title="Settings" />} />
+                <Route path="services"     element={<ServicesPage />} />
+                <Route path="resources"    element={<ResourcesPage />} />
+                <Route path="analytics"    element={<AnalyticsPage />} />
+                <Route path="settings"     element={<SettingsPage />} />
+                <Route path="notifications" element={<NotificationsPage />} />
               </Route>
 
               {/* Fallback */}
-              <Route path="*" element={<Navigate to="/login" replace />} />
+              <Route path="*" element={<NotFound />} />
+
+              {/* ── Customer Portal ── */}
+              <Route
+                path="/portal"
+                element={
+                  <RoleProtectedRoute allowedRoles={['CUSTOMER']}>
+                    <CustomerLayout />
+                  </RoleProtectedRoute>
+                }
+              >
+                <Route index              element={<RootRedirect />} />
+                <Route path="dashboard"   element={<CustomerDashboard />} />
+                <Route path="book"        element={<CustomerBooking />} />
+                <Route path="appointments" element={<CustomerAppointments />} />
+                <Route path="profile"     element={<CustomerProfile />} />
+              </Route>
             </Routes>
           </BrowserRouter>
         </AuthProvider>
@@ -72,17 +108,3 @@ export default function App() {
   );
 }
 
-// Temporary placeholder until each page is implemented
-function PlaceholderPage({ title }: { title: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 text-center">
-      <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center">
-        <span className="text-2xl">🚧</span>
-      </div>
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight">{title}</h2>
-        <p className="text-muted-foreground mt-1 text-sm">This page is coming soon.</p>
-      </div>
-    </div>
-  );
-}

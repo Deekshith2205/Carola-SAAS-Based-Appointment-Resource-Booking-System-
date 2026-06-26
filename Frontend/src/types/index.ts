@@ -25,7 +25,20 @@ export interface User {
 
 export interface AuthResponse {
   token: string;
+  refreshToken?: string;
   user: User;
+}
+
+export interface LoginInput {
+  email: string;
+  password: string;
+}
+
+export interface RegisterInput {
+  name: string;
+  email: string;
+  password: string;
+  role?: UserRole;
 }
 
 // ---------------------------------------------------------------------------
@@ -54,7 +67,7 @@ export interface Staff {
   designation?: string;
   availabilityStatus: AvailabilityStatus;
   createdAt: string;
-  user?: Pick<User, 'id' | 'name' | 'email'>;
+  user?: Pick<User, 'id' | 'name' | 'email' | 'role'>;
 }
 
 // ---------------------------------------------------------------------------

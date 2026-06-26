@@ -3,13 +3,12 @@ import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { 
-  ChevronRight, ChevronLeft, Calendar as CalendarIcon, 
+  ChevronRight, ChevronLeft, 
   Clock, User, CheckCircle2, Loader2, Scissors, CalendarDays
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { cn } from '../../lib/utils';
-import { useAuth } from '../../context/AuthContext';
 
 // ─── Validation Schemas ───────────────────────────────────────────────────────
 const serviceStepSchema = z.object({

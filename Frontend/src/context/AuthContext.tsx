@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
 
 export type UserRole = 'SUPER_ADMIN' | 'BUSINESS_OWNER' | 'STAFF' | 'CUSTOMER';
@@ -22,54 +23,51 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const queryClient = useQueryClient();
+
+  const { data: user, isLoading, isError } = useQuery({
+    queryKey: ['auth', 'me'],
+    queryFn: async () => {
+      if (!token) return null;
+      const response = await api.get('/auth/me');
+      return response.data.data.user as User;
+    },
+    enabled: !!token,
+    retry: false,
+  });
 
   useEffect(() => {
-    const initAuth = async () => {
-      const storedToken = localStorage.getItem('token');
-      if (!storedToken) {
-        setIsLoading(false);
-        return;
-      }
-      
-      try {
-        // Fetch current user from backend
-        const response = await api.get('/auth/me');
-        setUser(response.data.data.user);
-      } catch (error) {
-        console.error('Failed to authenticate:', error);
-        localStorage.removeItem('token');
-        setToken(null);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    initAuth();
-  }, []);
+    if (isError) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('refreshToken');
+      localStorage.removeItem('businessId');
+      setToken(null);
+    }
+  }, [isError]);
 
   const login = (newToken: string, newUser: User) => {
     localStorage.setItem('token', newToken);
     setToken(newToken);
-    setUser(newUser);
+    queryClient.setQueryData(['auth', 'me'], newUser);
   };
 
   const logout = () => {
     localStorage.removeItem('token');
+    localStorage.removeItem('refreshToken');
+    localStorage.removeItem('businessId');
     setToken(null);
-    setUser(null);
+    queryClient.removeQueries({ queryKey: ['auth', 'me'] });
     window.location.href = '/login';
   };
 
   return (
     <AuthContext.Provider
       value={{
-        user,
+        user: user || null,
         token,
         isAuthenticated: !!user,
-        isLoading,
+        isLoading: token ? isLoading : false,
         login,
         logout,
       }}
